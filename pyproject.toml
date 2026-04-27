@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "gpis-splatting-bootstrap"
 version = "0.1.0"
@@ -21,3 +25,6 @@ evaluate = "gpis_splatting.cli.evaluate:main"
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "--basetemp=.pytest_tmp"
+
+[tool.setuptools.packages.find]
+include = ["gpis_splatting*"]
