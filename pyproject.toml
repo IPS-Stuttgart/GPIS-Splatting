@@ -1,0 +1,23 @@
+[project]
+name = "gpis-splatting-bootstrap"
+version = "0.1.0"
+description = "Minimal synthetic GPIS to uncertainty-gated splat rendering prototype."
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "torch",
+  "matplotlib",
+  "pandas",
+  "Pillow",
+]
+
+[project.scripts]
+generate_scene = "gpis_splatting.cli.generate_scene:main"
+fit_gpis = "gpis_splatting.cli.fit_gpis:main"
+render_splats = "gpis_splatting.cli.render_splats:main"
+evaluate = "gpis_splatting.cli.evaluate:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--basetemp=.pytest_tmp"
