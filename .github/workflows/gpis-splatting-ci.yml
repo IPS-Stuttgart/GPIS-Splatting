@@ -1,6 +1,7 @@
+---
 name: GPIS Splatting CI
 
-on:
+on: # yamllint disable-line rule:truthy
   push:
     branches:
       - main
@@ -193,4 +194,3 @@ jobs:
         uses: EnricoMi/publish-unit-test-result-action@v2
         with:
           files: "test-results/**/*.xml"
-
