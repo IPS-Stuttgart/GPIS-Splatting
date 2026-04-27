@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 import numpy as np
 
 from gpis_splatting.gpis import load_model
 from gpis_splatting.paths import scene_dir
 from gpis_splatting.renderer import render_splats, save_image, selected_views
-from gpis_splatting.scenes import SCENES
 from gpis_splatting.serialization import read_json, write_json
 from gpis_splatting.splats import gpis_gate_for_splats, load_splats, make_candidate_splats, save_splats
 
@@ -97,4 +95,3 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-

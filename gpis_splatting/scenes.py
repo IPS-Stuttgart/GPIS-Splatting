@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
 
 import torch
 
@@ -125,4 +124,3 @@ def sample_scene(
         "true_sdf": true_values,
         "normals": normals,
     }
-

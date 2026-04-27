@@ -47,7 +47,6 @@ def save_uncertainty_slice(
     uncertainty: np.ndarray,
     grid_size: int,
 ) -> None:
-    z_abs = np.abs(grid_xyz[:, 2])
     z_value = np.unique(grid_xyz[:, 2])[np.argmin(np.abs(np.unique(grid_xyz[:, 2])))]
     mask = np.isclose(grid_xyz[:, 2], z_value)
     xy = grid_xyz[mask][:, :2]
@@ -67,4 +66,3 @@ def save_uncertainty_slice(
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
-

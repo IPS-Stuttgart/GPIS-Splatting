@@ -1,0 +1,15 @@
+---
+# Keep MegaLinter focused on checks that are useful before the prototype has
+# strict typing, spelling, security-scan baselines, and full style policy.
+ENABLE_LINTERS:
+  - ACTION_ACTIONLINT
+  - MARKDOWN_MARKDOWNLINT
+  - PYTHON_RUFF
+  - REPOSITORY_GIT_DIFF
+  - YAML_PRETTIER
+  - YAML_YAMLLINT
+  - YAML_V8R
+
+VALIDATE_ALL_CODEBASE: true
+PRINT_ALPACA: false
+SHOW_ELAPSED_TIME: true
