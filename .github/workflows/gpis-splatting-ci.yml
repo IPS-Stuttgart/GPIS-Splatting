@@ -25,10 +25,6 @@ on: # yamllint disable-line rule:truthy
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.ref }}-${{ github.workflow }}
-  cancel-in-progress: true
-
 jobs:
   tests-and-smoke:
     name: Tests + CLI smoke (py${{ matrix.python-version }})
