@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "gpis-splatting-bootstrap"
 version = "0.1.0"
 description = "Minimal synthetic GPIS to uncertainty-gated splat rendering prototype."
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
   "numpy",
   "torch",
@@ -27,8 +27,8 @@ pythonpath = ["src"]
 addopts = "--basetemp=.pytest_tmp"
 
 [tool.ruff]
-line-length = 120
-target-version = "py310"
+line-length = 180
+target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
