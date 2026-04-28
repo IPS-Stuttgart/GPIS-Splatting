@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import torch
 
+from gpis_splatting.feedback import refine_gpis_with_splat_feedback
 from gpis_splatting.gpis import fit_dense_gpis, predict_gpis, rbf_kernel, surface_band_probability
 from gpis_splatting.scenes import sample_scene
+from gpis_splatting.splats import make_candidate_splats
 
 
 def test_rbf_kernel_is_symmetric_and_psd() -> None:
@@ -38,3 +40,25 @@ def test_dense_gpis_predicts_stable_quantities() -> None:
     assert torch.all((prediction.inside_probability >= 0.0) & (prediction.inside_probability <= 1.0))
     assert torch.all((gate >= 0.0) & (gate <= 1.0))
 
+
+def test_splat_feedback_adds_pseudo_observations() -> None:
+    data = sample_scene("sphere", num_points=50, seed=8, noise_std=0.02)
+    model = fit_dense_gpis(data["points"], data["observed_sdf"], lengthscale=0.5, noise_std=0.03)
+    splats = make_candidate_splats("sphere", num_splats=70, offsurface_fraction=0.25, seed=11)
+
+    feedback = refine_gpis_with_splat_feedback(
+        model,
+        splats,
+        epsilon=0.12,
+        iterations=1,
+        pseudo_points_per_iteration=12,
+        min_gate=0.0,
+    )
+
+    assert feedback.base_gate.shape == (splats.centers.shape[0],)
+    assert feedback.feedback_gate.shape == feedback.base_gate.shape
+    assert feedback.selected_mask.sum() == 12
+    assert feedback.model.x_train.shape[0] == model.x_train.shape[0] + 12
+    assert feedback.model.observation_noise_std is not None
+    assert len(feedback.trace) == 1
+    assert torch.all((feedback.feedback_gate >= 0.0) & (feedback.feedback_gate <= 1.0))

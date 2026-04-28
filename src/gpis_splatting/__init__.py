@@ -3,6 +3,7 @@
 __all__ = [
     "scenes",
     "gpis",
+    "feedback",
     "splats",
     "renderer",
     "metrics",
