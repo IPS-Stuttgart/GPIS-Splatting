@@ -23,8 +23,9 @@ evaluate = "gpis_splatting.cli.evaluate:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src"]
 addopts = "--basetemp=.pytest_tmp"
 
 [tool.setuptools.packages.find]
+where = ["src"]
 include = ["gpis_splatting*"]

@@ -9,6 +9,7 @@ not to implement scalable SKI, CUDA kernels, dynamic scenes, or full 3DGS.
 From this directory:
 
 ```powershell
+python -m pip install -e .
 python -m gpis_splatting.cli.generate_scene --shape sphere --scene sphere_demo --num-points 180
 python -m gpis_splatting.cli.fit_gpis --scene sphere_demo --grid-size 28
 python -m gpis_splatting.cli.render_splats --scene sphere_demo --view all
@@ -47,4 +48,4 @@ evaluate --scene torus_demo
 - GPIS gate applied as `tau_tilde_i = p_0,epsilon(x_i) * tau_i`
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
-
+- Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.

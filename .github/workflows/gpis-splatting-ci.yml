@@ -6,7 +6,7 @@ on: # yamllint disable-line rule:truthy
     branches:
       - main
     paths:
-      - "gpis_splatting/**"
+      - "src/gpis_splatting/**"
       - "tests/**"
       - "pyproject.toml"
       - "README.md"
@@ -15,7 +15,7 @@ on: # yamllint disable-line rule:truthy
     branches:
       - main
     paths:
-      - "gpis_splatting/**"
+      - "src/gpis_splatting/**"
       - "tests/**"
       - "pyproject.toml"
       - "README.md"
