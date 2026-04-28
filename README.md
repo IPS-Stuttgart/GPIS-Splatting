@@ -44,17 +44,17 @@ evaluate --scene torus_demo
 To run the first bidirectional GPIS-splat feedback loop, enable one or more feedback iterations:
 
 ```powershell
-render_splats --scene torus_demo --view all --feedback-iterations 2
+render_splats --scene torus_demo --view all --feedback-iterations 2 --feedback-selector uncertainty
 evaluate --scene torus_demo
 ```
 
 To compare the one-way gate against multiple feedback depths across synthetic shapes:
 
 ```powershell
-run_ablation --shapes sphere torus --feedback-iterations 0 1 2
+run_ablation --shapes sphere torus --feedback-iterations 0 1 2 --feedback-selectors gate uncertainty uncertainty_diverse
 ```
 
-This writes `experiments/feedback_ablation/ablation_metrics.csv` with one row per shape and feedback setting.
+This writes `experiments/feedback_ablation/ablation_metrics.csv` with one row per shape, feedback setting, and selector mode.
 
 ## Development
 
@@ -81,7 +81,8 @@ python -m build
 - Orthographic CPU splat renderer with Beer-Lambert optical-thickness compositing
 - GPIS gate applied as `tau_tilde_i = p_0,epsilon(x_i) * tau_i`
 - Optional bidirectional feedback: high-confidence gated splats become heteroscedastic GPIS zero-level pseudo observations
-- Ablation runner for comparing feedback iteration counts across synthetic shapes
+- Feedback selectors for gate-only, uncertainty-weighted, and diversity-suppressed pseudo-observation promotion
+- Ablation runner for comparing feedback iteration counts and selector modes across synthetic shapes
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
 - Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.

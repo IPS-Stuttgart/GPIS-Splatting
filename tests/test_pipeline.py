@@ -59,6 +59,8 @@ def test_small_end_to_end_pipeline(tmp_path: Path) -> None:
             "16",
             "--feedback-min-gate",
             "0.0",
+            "--feedback-selector",
+            "uncertainty",
             "--output-root",
             str(root),
         ]
@@ -96,6 +98,9 @@ def test_feedback_ablation_runner_writes_comparison_table(tmp_path: Path) -> Non
             "--feedback-iterations",
             "0",
             "1",
+            "--feedback-selectors",
+            "gate",
+            "uncertainty",
             "--num-points",
             "45",
             "--grid-size",
@@ -122,12 +127,14 @@ def test_feedback_ablation_runner_writes_comparison_table(tmp_path: Path) -> Non
     assert (out_dir / "ablation_config.json").exists()
     assert metrics_path.exists()
     assert (out_dir / "sphere_fb0" / "metrics.csv").exists()
-    assert (out_dir / "sphere_fb1" / "feedback_trace.csv").exists()
+    assert (out_dir / "sphere_fb1_gate" / "feedback_trace.csv").exists()
+    assert (out_dir / "sphere_fb1_uncertainty" / "feedback_trace.csv").exists()
 
     metrics = pd.read_csv(metrics_path)
-    assert list(metrics["feedback_iterations"]) == [0, 1]
+    assert list(metrics["feedback_iterations"]) == [0, 1, 1]
+    assert list(metrics["feedback_selector"]) == ["none", "gate", "uncertainty"]
     assert set(metrics["shape"]) == {"sphere"}
     assert metrics.loc[metrics["feedback_iterations"] == 0, "feedback_selected_splats"].iloc[0] == 0
-    assert metrics.loc[metrics["feedback_iterations"] == 1, "feedback_selected_splats"].iloc[0] == 6
+    assert (metrics.loc[metrics["feedback_iterations"] == 1, "feedback_selected_splats"] == 6).all()
     assert "psnr_gpis_front" in metrics
     assert "psnr_feedback_front" in metrics
