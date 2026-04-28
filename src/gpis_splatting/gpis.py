@@ -21,6 +21,7 @@ class GPISModel:
     noise_std: float
     mean_constant: float
     jitter: float = 1e-6
+    observation_noise_std: Tensor | None = None
 
     @property
     def dtype(self) -> torch.dtype:
@@ -72,24 +73,44 @@ def fit_dense_gpis(
     lengthscale: float = 0.34,
     variance: float = 1.0,
     noise_std: float = 0.035,
+    observation_noise_std: Tensor | None = None,
     mean_constant: float | None = None,
     jitter: float = 1e-6,
 ) -> GPISModel:
     x_train = x_train.detach().to(dtype=torch.float64, device="cpu")
     y_train = y_train.detach().reshape(-1).to(dtype=torch.float64, device="cpu")
+    if observation_noise_std is None:
+        observation_noise = None
+        noise_variance = torch.full_like(y_train, noise_std**2)
+    else:
+        observation_noise = observation_noise_std.detach().reshape(-1).to(dtype=torch.float64, device="cpu")
+        if observation_noise.shape != y_train.shape:
+            raise ValueError("observation_noise_std must have one value per training observation.")
+        noise_variance = torch.clamp(observation_noise, min=1e-8).pow(2)
 
     if mean_constant is None:
         mean_constant = float(y_train.mean())
 
     kernel = rbf_kernel(x_train, x_train, lengthscale, variance)
     eye = torch.eye(x_train.shape[0], dtype=x_train.dtype, device=x_train.device)
-    system = kernel + (noise_std**2 + jitter) * eye
+    system = kernel + torch.diag(noise_variance) + jitter * eye
     chol, info = torch.linalg.cholesky_ex(system)
     if int(info.item()) != 0:
         raise RuntimeError(f"Cholesky factorization failed at leading minor {int(info.item())}.")
     centered_y = y_train - mean_constant
     alpha = torch.cholesky_solve(centered_y[:, None], chol).reshape(-1)
-    return GPISModel(x_train, y_train, alpha, chol, lengthscale, variance, noise_std, mean_constant, jitter)
+    return GPISModel(
+        x_train,
+        y_train,
+        alpha,
+        chol,
+        lengthscale,
+        variance,
+        noise_std,
+        mean_constant,
+        jitter,
+        observation_noise,
+    )
 
 
 def predict_gpis(model: GPISModel, x_query: Tensor, batch_size: int = 8192) -> GPISPrediction:
@@ -147,6 +168,8 @@ def save_model(path: str, model: GPISModel, *, metadata: dict[str, object] | Non
         "mean_constant": np.array(model.mean_constant),
         "jitter": np.array(model.jitter),
     }
+    if model.observation_noise_std is not None:
+        data["observation_noise_std"] = model.observation_noise_std.detach().cpu().numpy()
     if metadata:
         for key, value in metadata.items():
             data[f"meta_{key}"] = np.array(value)
@@ -165,6 +188,9 @@ def load_model(path: str) -> tuple[GPISModel, dict[str, object]]:
         noise_std=float(npz["noise_std"]),
         mean_constant=float(npz["mean_constant"]) if "mean_constant" in npz.files else 0.0,
         jitter=float(npz["jitter"]),
+        observation_noise_std=torch.from_numpy(npz["observation_noise_std"]).to(dtype=torch.float64)
+        if "observation_noise_std" in npz.files
+        else None,
     )
     metadata: dict[str, object] = {}
     for key in npz.files:

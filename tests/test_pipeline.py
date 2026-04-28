@@ -52,6 +52,12 @@ def test_small_end_to_end_pipeline(tmp_path: Path) -> None:
             "120",
             "--epsilon",
             "0.11",
+            "--feedback-iterations",
+            "1",
+            "--feedback-pseudo-points",
+            "16",
+            "--feedback-min-gate",
+            "0.0",
             "--output-root",
             str(root),
         ]
@@ -65,9 +71,15 @@ def test_small_end_to_end_pipeline(tmp_path: Path) -> None:
     assert (out_dir / "posterior_grid.npz").exists()
     assert (out_dir / "render_plain_front.png").exists()
     assert (out_dir / "render_gpis_front.png").exists()
+    assert (out_dir / "render_feedback_front.png").exists()
+    assert (out_dir / "feedback_gpis_model.npz").exists()
+    assert (out_dir / "feedback_trace.csv").exists()
+    assert (out_dir / "feedback_splat_gates.npz").exists()
     assert (out_dir / "metrics.csv").exists()
 
     metrics = pd.read_csv(out_dir / "metrics.csv").iloc[0]
     assert metrics["rmse_sdf"] < 0.35
     assert metrics["iou_inside"] > 0.35
     assert metrics["psnr_gpis_front"] >= metrics["psnr_plain_front"]
+    assert "psnr_feedback_front" in metrics
+    assert "feedback_rmse_sdf" in metrics
