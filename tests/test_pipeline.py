@@ -9,6 +9,7 @@ from gpis_splatting.cli.fit_gpis import main as fit_main
 from gpis_splatting.cli.generate_scene import main as generate_main
 from gpis_splatting.cli.render_splats import main as render_main
 from gpis_splatting.cli.run_ablation import main as ablation_main
+from gpis_splatting.cli.summarize_ablation import main as summarize_main
 
 
 def test_small_end_to_end_pipeline(tmp_path: Path) -> None:
@@ -138,3 +139,66 @@ def test_feedback_ablation_runner_writes_comparison_table(tmp_path: Path) -> Non
     assert (metrics.loc[metrics["feedback_iterations"] == 1, "feedback_selected_splats"] == 6).all()
     assert "psnr_gpis_front" in metrics
     assert "psnr_feedback_front" in metrics
+
+
+def test_ablation_summarizer_writes_plots_and_winners(tmp_path: Path) -> None:
+    root = tmp_path / "experiments" / "tiny_ablation"
+    root.mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {
+                "shape": "sphere",
+                "feedback_iterations": 0,
+                "feedback_selector": "none",
+                "scene": "sphere_fb0",
+                "psnr_gpis_front": 18.0,
+                "rmse_sdf": 0.24,
+                "iou_inside": 0.55,
+                "feedback_selected_splats": 0,
+            },
+            {
+                "shape": "sphere",
+                "feedback_iterations": 1,
+                "feedback_selector": "gate",
+                "scene": "sphere_fb1_gate",
+                "psnr_gpis_front": 18.0,
+                "psnr_feedback_front": 18.5,
+                "rmse_sdf": 0.24,
+                "feedback_rmse_sdf": 0.22,
+                "iou_inside": 0.55,
+                "feedback_iou_inside": 0.57,
+                "feedback_selected_splats": 6,
+            },
+            {
+                "shape": "sphere",
+                "feedback_iterations": 1,
+                "feedback_selector": "uncertainty",
+                "scene": "sphere_fb1_uncertainty",
+                "psnr_gpis_front": 18.0,
+                "psnr_feedback_front": 19.2,
+                "rmse_sdf": 0.24,
+                "feedback_rmse_sdf": 0.20,
+                "iou_inside": 0.55,
+                "feedback_iou_inside": 0.59,
+                "feedback_selected_splats": 6,
+            },
+        ]
+    ).to_csv(root / "ablation_metrics.csv", index=False)
+
+    summarize_main(["--ablation-root", str(root)])
+
+    summary_dir = root / "summary"
+    assert (summary_dir / "ablation_summary.csv").exists()
+    assert (summary_dir / "ablation_winners.csv").exists()
+    assert (summary_dir / "ablation_summary.md").exists()
+    assert (summary_dir / "psnr_delta_by_selector.png").exists()
+    assert (summary_dir / "rmse_delta_by_selector.png").exists()
+    assert (summary_dir / "selected_splats_by_selector.png").exists()
+    assert (summary_dir / "feedback_iteration_trend.png").exists()
+
+    summary = pd.read_csv(summary_dir / "ablation_summary.csv")
+    winners = pd.read_csv(summary_dir / "ablation_winners.csv")
+    assert {round(value, 6) for value in summary["psnr_delta"]} == {0.0, 0.5, 1.2}
+    assert winners.iloc[0]["shape"] == "sphere"
+    assert winners.iloc[0]["feedback_selector"] == "uncertainty"
+    assert round(winners.iloc[0]["psnr_delta"], 6) == 1.2

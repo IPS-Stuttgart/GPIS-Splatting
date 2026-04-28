@@ -56,6 +56,14 @@ run_ablation --shapes sphere torus --feedback-iterations 0 1 2 --feedback-select
 
 This writes `experiments/feedback_ablation/ablation_metrics.csv` with one row per shape, feedback setting, and selector mode.
 
+Summarize the ablation into plots and winner tables:
+
+```powershell
+summarize_ablation --ablation-root experiments/feedback_ablation
+```
+
+This writes `ablation_summary.csv`, `ablation_winners.csv`, `ablation_summary.md`, and comparison plots under `experiments/feedback_ablation/summary/`.
+
 ## Development
 
 Install the local package and development tools:
@@ -83,6 +91,7 @@ python -m build
 - Optional bidirectional feedback: high-confidence gated splats become heteroscedastic GPIS zero-level pseudo observations
 - Feedback selectors for gate-only, uncertainty-weighted, and diversity-suppressed pseudo-observation promotion
 - Ablation runner for comparing feedback iteration counts and selector modes across synthetic shapes
+- Ablation summarizer for PSNR/RMSE/IoU deltas, selector winners, and comparison plots
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
 - Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.
