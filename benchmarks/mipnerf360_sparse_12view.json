@@ -1,0 +1,34 @@
+{
+  "dataset": "Mip-NeRF 360 Sparse",
+  "metric_directions": {
+    "lpips_vgg": "lower",
+    "psnr": "higher",
+    "ssim": "higher"
+  },
+  "name": "mipnerf360_sparse_12view",
+  "primary_baseline": "gaussian_splatting",
+  "protocol_url": "https://nerfbaselines.github.io/mipnerf360-sparse",
+  "reference_baselines": {
+    "gaussian_splatting": {
+      "gpu_memory_gb": 7.16,
+      "lpips_vgg": 0.412,
+      "psnr": 19.76,
+      "ssim": 0.568,
+      "time": "19m 46s"
+    }
+  },
+  "retrieved_on": "2026-04-28",
+  "scene_count": 9,
+  "scenes": [
+    "garden",
+    "bicycle",
+    "flowers",
+    "treehill",
+    "stump",
+    "kitchen",
+    "bonsai",
+    "counter",
+    "room"
+  ],
+  "train_views": 12
+}

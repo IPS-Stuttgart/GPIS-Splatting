@@ -9,6 +9,7 @@ from gpis_splatting.cli.fit_gpis import main as fit_main
 from gpis_splatting.cli.generate_scene import main as generate_main
 from gpis_splatting.cli.render_splats import main as render_main
 from gpis_splatting.cli.run_ablation import main as ablation_main
+from gpis_splatting.cli.run_evaluation import main as evaluation_main
 from gpis_splatting.cli.summarize_ablation import main as summarize_main
 
 
@@ -202,3 +203,36 @@ def test_ablation_summarizer_writes_plots_and_winners(tmp_path: Path) -> None:
     assert winners.iloc[0]["shape"] == "sphere"
     assert winners.iloc[0]["feedback_selector"] == "uncertainty"
     assert round(winners.iloc[0]["psnr_delta"], 6) == 1.2
+
+
+def test_evaluation_runner_writes_report_and_checks(tmp_path: Path) -> None:
+    root = tmp_path / "experiments"
+
+    evaluation_main(
+        [
+            "--preset",
+            "synthetic_ci",
+            "--output-root",
+            str(root),
+            "--experiment-name",
+            "tiny_evaluation",
+        ]
+    )
+
+    out_dir = root / "tiny_evaluation"
+    assert (out_dir / "ablation_metrics.csv").exists()
+    assert (out_dir / "summary" / "ablation_summary.csv").exists()
+    assert (out_dir / "summary" / "ablation_winners.csv").exists()
+    assert (out_dir / "evaluation_config.json").exists()
+    assert (out_dir / "evaluation_checks.csv").exists()
+    assert (out_dir / "evaluation_status.json").exists()
+    assert (out_dir / "evaluation_report.md").exists()
+
+    checks = pd.read_csv(out_dir / "evaluation_checks.csv")
+    assert checks["passed"].all()
+    assert set(checks["check"]) >= {
+        "expected_row_count",
+        "base_metric_columns_present",
+        "feedback_metric_columns_present",
+        "winner_rows_available",
+    }
