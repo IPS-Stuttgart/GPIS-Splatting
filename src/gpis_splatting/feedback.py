@@ -9,7 +9,6 @@ import torch
 from .gpis import GPISModel, fit_dense_gpis
 from .splats import SplatCloud, gpis_gate_for_splats
 
-
 Tensor = torch.Tensor
 
 FEEDBACK_TRACE_FIELDS = (

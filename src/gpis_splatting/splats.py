@@ -8,7 +8,6 @@ import torch
 from .gpis import GPISModel, predict_gpis, surface_band_probability
 from .scenes import SCENES, sdf, sdf_normals
 
-
 Tensor = torch.Tensor
 
 

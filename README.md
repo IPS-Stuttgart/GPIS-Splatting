@@ -56,6 +56,23 @@ run_ablation --shapes sphere torus --feedback-iterations 0 1 2
 
 This writes `experiments/feedback_ablation/ablation_metrics.csv` with one row per shape and feedback setting.
 
+## Development
+
+Install the local package and development tools:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pip install -e .
+```
+
+Run the baseline checks before opening a PR:
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+python -m build
+```
+
 ## Implemented Scope
 
 - Synthetic SDF scenes: `sphere`, `torus`, `two_objects`, `non_star_convex`
