@@ -12,3 +12,5 @@ dist/
 
 # Generated experiment outputs can be recreated with the README commands.
 experiments/
+real_scenes/
+real_evaluations/
