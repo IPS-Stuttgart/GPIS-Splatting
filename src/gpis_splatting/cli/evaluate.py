@@ -32,39 +32,32 @@ def main(argv: list[str] | None = None) -> None:
     config = read_json(config_path)
     if posterior_path.exists():
         posterior = np.load(posterior_path)
-        prediction = GPISPrediction(
-            mean=torch.from_numpy(posterior["mean"]).to(dtype=torch.float64),
-            variance=torch.from_numpy(posterior["variance"]).to(dtype=torch.float64),
-            gradient=torch.zeros((posterior["mean"].shape[0], 3), dtype=torch.float64),
-        )
+        eval_points = torch.from_numpy(posterior["grid_xyz"]).to(dtype=torch.float64)
+        true_sdf = torch.from_numpy(posterior["true_sdf"]).to(dtype=torch.float64)
         if "distance" in posterior.files and "distance_std" in posterior.files:
-            true_sdf = torch.from_numpy(posterior["true_sdf"]).to(dtype=torch.float64)
-            row = {
-                "rmse_sdf": float(np.sqrt(np.mean((posterior["mean"] - posterior["true_sdf"]) ** 2))),
-                "iou_inside": float(
-                    np.logical_and(posterior["mean"] <= 0.0, posterior["true_sdf"] <= 0.0).sum()
-                    / max(np.logical_or(posterior["mean"] <= 0.0, posterior["true_sdf"] <= 0.0).sum(), 1)
-                ),
-            }
-            full_prediction = GPISPrediction(
+            prediction = GPISPrediction(
                 mean=torch.from_numpy(posterior["mean"]).to(dtype=torch.float64),
                 variance=torch.from_numpy(posterior["variance"]).to(dtype=torch.float64),
                 gradient=torch.from_numpy(_gradient_from_distance_arrays(posterior)).to(dtype=torch.float64),
             )
-            row = gpis_metric_row(full_prediction, true_sdf, render_dir=out_dir)
         else:
             model, _ = load_model(str(model_path))
-            grid = torch.from_numpy(posterior["grid_xyz"]).to(dtype=torch.float64)
-            full_prediction = predict_gpis(model, grid, batch_size=args.batch_size)
-            true_sdf = torch.from_numpy(posterior["true_sdf"]).to(dtype=torch.float64)
-            row = gpis_metric_row(full_prediction, true_sdf, render_dir=out_dir)
+            prediction = predict_gpis(model, eval_points, batch_size=args.batch_size)
     else:
         model, _ = load_model(str(model_path))
         samples = np.load(out_dir / "samples.npz")
-        points = torch.from_numpy(samples["points"]).to(dtype=torch.float64)
-        prediction = predict_gpis(model, points, batch_size=args.batch_size)
-        true_sdf = sdf(points, config["shape"])
-        row = gpis_metric_row(prediction, true_sdf, render_dir=out_dir)
+        eval_points = torch.from_numpy(samples["points"]).to(dtype=torch.float64)
+        prediction = predict_gpis(model, eval_points, batch_size=args.batch_size)
+        true_sdf = sdf(eval_points, config["shape"])
+
+    row = gpis_metric_row(prediction, true_sdf, render_dir=out_dir)
+    feedback_model_path = out_dir / "feedback_gpis_model.npz"
+    if feedback_model_path.exists():
+        feedback_model, _ = load_model(str(feedback_model_path))
+        feedback_prediction = predict_gpis(feedback_model, eval_points, batch_size=args.batch_size)
+        feedback_row = gpis_metric_row(feedback_prediction, true_sdf)
+        for key, value in feedback_row.items():
+            row[f"feedback_{key}"] = value
 
     metrics_path = out_dir / "metrics.csv"
     save_metrics_csv(metrics_path, row)

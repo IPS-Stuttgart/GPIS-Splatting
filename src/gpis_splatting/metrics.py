@@ -85,10 +85,13 @@ def gpis_metric_row(
             ref = render_path / f"render_reference_{view}.png"
             plain = render_path / f"render_plain_{view}.png"
             gated = render_path / f"render_gpis_{view}.png"
+            feedback = render_path / f"render_feedback_{view}.png"
             if ref.exists() and plain.exists():
                 row[f"psnr_plain_{view}"] = psnr(plain, ref)
             if ref.exists() and gated.exists():
                 row[f"psnr_gpis_{view}"] = psnr(gated, ref)
+            if ref.exists() and feedback.exists():
+                row[f"psnr_feedback_{view}"] = psnr(feedback, ref)
     return row
 
 

@@ -26,6 +26,8 @@ Outputs are written to `experiments/<scene>/`:
 - `render_reference_<view>.png`
 - `render_plain_<view>.png`
 - `render_gpis_<view>.png`
+- `render_feedback_<view>.png` when `render_splats --feedback-iterations` is used
+- `feedback_gpis_model.npz`, `feedback_trace.csv`, and `feedback_splat_gates.npz` when feedback is used
 - `gpis_surface.png`
 - `uncertainty_slice.png`
 - `metrics.csv`
@@ -39,6 +41,13 @@ render_splats --scene torus_demo --view all
 evaluate --scene torus_demo
 ```
 
+To run the first bidirectional GPIS-splat feedback loop, enable one or more feedback iterations:
+
+```powershell
+render_splats --scene torus_demo --view all --feedback-iterations 2
+evaluate --scene torus_demo
+```
+
 ## Implemented Scope
 
 - Synthetic SDF scenes: `sphere`, `torus`, `two_objects`, `non_star_convex`
@@ -46,6 +55,7 @@ evaluate --scene torus_demo
 - Analytic posterior mean gradients for distance proxy and GPIS gates
 - Orthographic CPU splat renderer with Beer-Lambert optical-thickness compositing
 - GPIS gate applied as `tau_tilde_i = p_0,epsilon(x_i) * tau_i`
+- Optional bidirectional feedback: high-confidence gated splats become heteroscedastic GPIS zero-level pseudo observations
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
 - Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.

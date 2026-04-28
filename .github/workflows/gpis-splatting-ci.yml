@@ -78,6 +78,9 @@ jobs:
             --image-size 48 \
             --num-splats 120 \
             --epsilon 0.11 \
+            --feedback-iterations 1 \
+            --feedback-pseudo-points 16 \
+            --feedback-min-gate 0.0 \
             --output-root ci_smoke
           python -m gpis_splatting.cli.evaluate \
             --scene ci_sphere \
@@ -99,6 +102,10 @@ jobs:
               "render_reference_front.png",
               "render_plain_front.png",
               "render_gpis_front.png",
+              "render_feedback_front.png",
+              "feedback_gpis_model.npz",
+              "feedback_trace.csv",
+              "feedback_splat_gates.npz",
               "metrics.csv",
           ]
           missing = [name for name in required if not (scene_dir / name).exists()]
@@ -108,6 +115,8 @@ jobs:
           assert metrics["rmse_sdf"] < 0.4
           assert metrics["iou_inside"] > 0.35
           assert metrics["psnr_gpis_front"] >= metrics["psnr_plain_front"]
+          assert "psnr_feedback_front" in metrics
+          assert "feedback_rmse_sdf" in metrics
 
           print(metrics.to_string())
           PY
@@ -129,6 +138,8 @@ jobs:
             ci_smoke/ci_sphere/render_reference_front.png
             ci_smoke/ci_sphere/render_plain_front.png
             ci_smoke/ci_sphere/render_gpis_front.png
+            ci_smoke/ci_sphere/render_feedback_front.png
+            ci_smoke/ci_sphere/feedback_trace.csv
             ci_smoke/ci_sphere/gpis_surface.png
             ci_smoke/ci_sphere/uncertainty_slice.png
 
