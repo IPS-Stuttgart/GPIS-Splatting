@@ -39,6 +39,23 @@ render_splats --scene torus_demo --view all
 evaluate --scene torus_demo
 ```
 
+## Development
+
+Install the local package and development tools:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pip install -e .
+```
+
+Run the baseline checks before opening a PR:
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+python -m build
+```
+
 ## Implemented Scope
 
 - Synthetic SDF scenes: `sphere`, `torus`, `two_objects`, `non_star_convex`

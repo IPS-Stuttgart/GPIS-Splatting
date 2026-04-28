@@ -9,7 +9,6 @@ from PIL import Image
 
 from .splats import SplatCloud
 
-
 Tensor = torch.Tensor
 
 

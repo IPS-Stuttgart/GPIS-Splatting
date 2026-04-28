@@ -4,7 +4,6 @@ import math
 
 import torch
 
-
 SQRT_2 = math.sqrt(2.0)
 
 

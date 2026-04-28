@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 import torch
 
-
 Tensor = torch.Tensor
 
 

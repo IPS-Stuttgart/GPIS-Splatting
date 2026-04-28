@@ -7,7 +7,6 @@ import torch
 
 from .math_utils import clamp_positive, normal_cdf
 
-
 Tensor = torch.Tensor
 
 
