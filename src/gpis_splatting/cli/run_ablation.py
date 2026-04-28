@@ -10,6 +10,7 @@ from gpis_splatting.cli.evaluate import main as evaluate_main
 from gpis_splatting.cli.fit_gpis import main as fit_main
 from gpis_splatting.cli.generate_scene import main as generate_main
 from gpis_splatting.cli.render_splats import main as render_main
+from gpis_splatting.feedback import FEEDBACK_SELECTORS
 from gpis_splatting.paths import scene_dir
 from gpis_splatting.scenes import available_shapes
 from gpis_splatting.serialization import write_json
@@ -19,6 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a synthetic feedback-iteration ablation.")
     parser.add_argument("--shapes", nargs="+", choices=available_shapes(), default=list(available_shapes()))
     parser.add_argument("--feedback-iterations", nargs="+", type=int, default=[0, 1, 2])
+    parser.add_argument("--feedback-selectors", nargs="+", choices=FEEDBACK_SELECTORS, default=list(FEEDBACK_SELECTORS))
     parser.add_argument("--output-root", default="experiments")
     parser.add_argument("--experiment-name", default="feedback_ablation")
     parser.add_argument("--num-points", type=int, default=140)
@@ -48,10 +50,12 @@ def main(argv: list[str] | None = None) -> None:
     rows = []
     for shape in args.shapes:
         for feedback_iterations in args.feedback_iterations:
-            rows.append(_run_case(args, experiment_root, shape, feedback_iterations))
+            selectors = ("none",) if feedback_iterations == 0 else tuple(args.feedback_selectors)
+            for selector in selectors:
+                rows.append(_run_case(args, experiment_root, shape, feedback_iterations, selector))
 
     metrics_path = experiment_root / "ablation_metrics.csv"
-    pd.DataFrame(rows).sort_values(["shape", "feedback_iterations"]).to_csv(metrics_path, index=False)
+    pd.DataFrame(rows).sort_values(["shape", "feedback_iterations", "feedback_selector"]).to_csv(metrics_path, index=False)
     print(f"Wrote {metrics_path}")
 
 
@@ -71,8 +75,9 @@ def _run_case(
     experiment_root: Path,
     shape: str,
     feedback_iterations: int,
+    selector: str,
 ) -> dict[str, Any]:
-    scene_name = f"{shape}_fb{feedback_iterations}"
+    scene_name = f"{shape}_fb{feedback_iterations}" if selector == "none" else f"{shape}_fb{feedback_iterations}_{selector}"
     case_dir = scene_dir(scene_name, experiment_root)
 
     generate_main(
@@ -129,6 +134,8 @@ def _run_case(
         "--output-root",
         str(experiment_root),
     ]
+    if selector != "none":
+        render_args.extend(["--feedback-selector", selector])
     if args.feedback_pseudo_noise_std is not None:
         render_args.extend(["--feedback-pseudo-noise-std", str(args.feedback_pseudo_noise_std)])
     render_main(render_args)
@@ -138,6 +145,7 @@ def _run_case(
     row: dict[str, Any] = {
         "shape": shape,
         "feedback_iterations": feedback_iterations,
+        "feedback_selector": selector,
         "scene": scene_name,
         "scene_dir": str(case_dir),
         **metrics,
@@ -174,6 +182,7 @@ def _config_from_args(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "shapes": list(args.shapes),
         "feedback_iterations": list(args.feedback_iterations),
+        "feedback_selectors": list(args.feedback_selectors),
         "num_points": args.num_points,
         "noise_std": args.noise_std,
         "grid_size": args.grid_size,

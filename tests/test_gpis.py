@@ -61,4 +61,46 @@ def test_splat_feedback_adds_pseudo_observations() -> None:
     assert feedback.model.x_train.shape[0] == model.x_train.shape[0] + 12
     assert feedback.model.observation_noise_std is not None
     assert len(feedback.trace) == 1
+    assert feedback.trace[0]["selector"] == "gate"
     assert torch.all((feedback.feedback_gate >= 0.0) & (feedback.feedback_gate <= 1.0))
+
+
+def test_uncertainty_feedback_selector_records_uncertainty_scores() -> None:
+    data = sample_scene("sphere", num_points=50, seed=10, noise_std=0.02)
+    model = fit_dense_gpis(data["points"], data["observed_sdf"], lengthscale=0.5, noise_std=0.03)
+    splats = make_candidate_splats("sphere", num_splats=70, offsurface_fraction=0.25, seed=13)
+
+    feedback = refine_gpis_with_splat_feedback(
+        model,
+        splats,
+        epsilon=0.12,
+        iterations=1,
+        pseudo_points_per_iteration=10,
+        min_gate=0.0,
+        selector="uncertainty",
+    )
+
+    assert feedback.selected_mask.sum() == 10
+    assert feedback.trace[0]["selector"] == "uncertainty"
+    assert feedback.trace[0]["selected_score_mean"] > 0.0
+    assert feedback.trace[0]["selected_distance_std_mean"] > 0.0
+
+
+def test_diverse_uncertainty_feedback_suppresses_nearby_splats() -> None:
+    data = sample_scene("sphere", num_points=50, seed=12, noise_std=0.02)
+    model = fit_dense_gpis(data["points"], data["observed_sdf"], lengthscale=0.5, noise_std=0.03)
+    splats = make_candidate_splats("sphere", num_splats=70, offsurface_fraction=0.25, seed=15)
+
+    feedback = refine_gpis_with_splat_feedback(
+        model,
+        splats,
+        epsilon=0.12,
+        iterations=1,
+        pseudo_points_per_iteration=10,
+        min_gate=0.0,
+        selector="uncertainty_diverse",
+        diversity_radius=10.0,
+    )
+
+    assert feedback.selected_mask.sum() == 1
+    assert feedback.trace[0]["selector"] == "uncertainty_diverse"

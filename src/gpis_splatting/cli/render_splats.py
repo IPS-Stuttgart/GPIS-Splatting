@@ -4,7 +4,7 @@ import argparse
 
 import numpy as np
 
-from gpis_splatting.feedback import refine_gpis_with_splat_feedback, save_feedback_trace
+from gpis_splatting.feedback import FEEDBACK_SELECTORS, refine_gpis_with_splat_feedback, save_feedback_trace
 from gpis_splatting.gpis import load_model, save_model
 from gpis_splatting.paths import scene_dir
 from gpis_splatting.renderer import render_splats, save_image, selected_views
@@ -44,6 +44,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Pseudo-observation noise floor. Defaults to the fitted GPIS observation noise.",
+    )
+    parser.add_argument(
+        "--feedback-selector",
+        choices=FEEDBACK_SELECTORS,
+        default="gate",
+        help="How feedback splats are scored before promotion to GPIS pseudo observations.",
+    )
+    parser.add_argument(
+        "--feedback-diversity-radius",
+        type=float,
+        default=0.16,
+        help="Minimum 3D distance between promoted splats when using uncertainty_diverse.",
     )
     return parser
 
@@ -87,6 +99,8 @@ def main(argv: list[str] | None = None) -> None:
                 pseudo_points_per_iteration=args.feedback_pseudo_points,
                 min_gate=args.feedback_min_gate,
                 pseudo_noise_std=args.feedback_pseudo_noise_std,
+                selector=args.feedback_selector,
+                diversity_radius=args.feedback_diversity_radius,
             )
             feedback_gate = feedback.feedback_gate
             save_model(
@@ -98,6 +112,8 @@ def main(argv: list[str] | None = None) -> None:
                     "feedback_iterations": args.feedback_iterations,
                     "feedback_pseudo_points": args.feedback_pseudo_points,
                     "feedback_min_gate": args.feedback_min_gate,
+                    "feedback_selector": args.feedback_selector,
+                    "feedback_diversity_radius": args.feedback_diversity_radius,
                 },
             )
             save_feedback_trace(out_dir / "feedback_trace.csv", feedback.trace)
@@ -108,6 +124,8 @@ def main(argv: list[str] | None = None) -> None:
                 selected_mask=feedback.selected_mask.detach().cpu().numpy(),
                 epsilon=np.array(args.epsilon),
                 iterations=np.array(args.feedback_iterations),
+                selector=np.array(args.feedback_selector),
+                diversity_radius=np.array(args.feedback_diversity_radius),
             )
 
     for view in selected_views(args.view):
@@ -145,6 +163,8 @@ def main(argv: list[str] | None = None) -> None:
         "feedback_pseudo_points": args.feedback_pseudo_points,
         "feedback_min_gate": args.feedback_min_gate,
         "feedback_pseudo_noise_std": args.feedback_pseudo_noise_std,
+        "feedback_selector": args.feedback_selector,
+        "feedback_diversity_radius": args.feedback_diversity_radius,
     }
     write_json(config_path, config)
 
