@@ -1,0 +1,80 @@
+---
+name: GPIS Evaluation
+
+on: # yamllint disable-line rule:truthy
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "benchmarks/**"
+      - "src/gpis_splatting/**"
+      - "tests/**"
+      - "requirements-dev.txt"
+      - "pyproject.toml"
+      - "README.md"
+      - ".github/workflows/evaluation.yml"
+  workflow_dispatch:
+    inputs:
+      preset:
+        description: Evaluation preset to run.
+        required: true
+        type: choice
+        default: synthetic_ci
+        options:
+          - synthetic_ci
+          - synthetic_quick
+      experiment_name:
+        description: Output experiment directory name.
+        required: true
+        type: string
+        default: ci_evaluation
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-evaluation:
+    name: Synthetic evaluation workflow
+    runs-on: ubuntu-latest
+    env:
+      EVAL_EXPERIMENT: ${{ github.event.inputs.experiment_name || 'ci_evaluation' }}
+      EVAL_PRESET: ${{ github.event.inputs.preset || 'synthetic_ci' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -e .
+
+      - name: Run evaluation preset
+        run: |
+          python -m gpis_splatting.cli.run_evaluation \
+            --preset "${EVAL_PRESET}" \
+            --output-root evaluation_runs \
+            --experiment-name "${EVAL_EXPERIMENT}" \
+            --benchmark-target benchmarks/mipnerf360_sparse_12view.json
+
+      - name: Publish report to job summary
+        run: cat "evaluation_runs/${EVAL_EXPERIMENT}/evaluation_report.md" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload evaluation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpis-evaluation-${{ env.EVAL_PRESET }}
+          path: |
+            evaluation_runs/${{ env.EVAL_EXPERIMENT }}/ablation_metrics.csv
+            evaluation_runs/${{ env.EVAL_EXPERIMENT }}/evaluation_checks.csv
+            evaluation_runs/${{ env.EVAL_EXPERIMENT }}/evaluation_config.json
+            evaluation_runs/${{ env.EVAL_EXPERIMENT }}/evaluation_report.md
+            evaluation_runs/${{ env.EVAL_EXPERIMENT }}/evaluation_status.json
+            evaluation_runs/${{ env.EVAL_EXPERIMENT }}/summary/**

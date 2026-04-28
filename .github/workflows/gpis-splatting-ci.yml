@@ -7,6 +7,7 @@ on: # yamllint disable-line rule:truthy
       - main
     paths:
       - "src/gpis_splatting/**"
+      - "benchmarks/**"
       - "tests/**"
       - "requirements-dev.txt"
       - "pyproject.toml"
@@ -17,6 +18,7 @@ on: # yamllint disable-line rule:truthy
       - main
     paths:
       - "src/gpis_splatting/**"
+      - "benchmarks/**"
       - "tests/**"
       - "requirements-dev.txt"
       - "pyproject.toml"
@@ -181,6 +183,7 @@ jobs:
           evaluate --help > /dev/null
           run_ablation --help > /dev/null
           summarize_ablation --help > /dev/null
+          run_evaluation --help > /dev/null
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4

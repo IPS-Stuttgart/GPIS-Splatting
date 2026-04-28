@@ -64,6 +64,21 @@ summarize_ablation --ablation-root experiments/feedback_ablation
 
 This writes `ablation_summary.csv`, `ablation_winners.csv`, `ablation_summary.md`, and comparison plots under `experiments/feedback_ablation/summary/`.
 
+Run a reproducible evaluation workflow with preset thresholds and report artifacts:
+
+```powershell
+run_evaluation --preset synthetic_quick --benchmark-target benchmarks/mipnerf360_sparse_12view.json
+```
+
+For pull requests and fast smoke checks, use the smaller preset:
+
+```powershell
+run_evaluation --preset synthetic_ci --experiment-name ci_evaluation
+```
+
+This chains ablation, summary generation, and evaluation checks. It writes `evaluation_config.json`, `evaluation_checks.csv`, `evaluation_status.json`,
+and `evaluation_report.md` under `experiments/<experiment-name>/`. The GitHub Actions evaluation workflow runs `synthetic_ci` and uploads the report plus summary artifacts.
+
 ## Development
 
 Install the local package and development tools:
@@ -92,6 +107,7 @@ python -m build
 - Feedback selectors for gate-only, uncertainty-weighted, and diversity-suppressed pseudo-observation promotion
 - Ablation runner for comparing feedback iteration counts and selector modes across synthetic shapes
 - Ablation summarizer for PSNR/RMSE/IoU deltas, selector winners, and comparison plots
+- Evaluation workflow for deterministic preset runs, pass/fail checks, report artifacts, and a Mip-NeRF 360 Sparse 12-view target manifest
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
 - Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.
