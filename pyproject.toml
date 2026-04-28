@@ -23,6 +23,9 @@ evaluate = "gpis_splatting.cli.evaluate:main"
 run_ablation = "gpis_splatting.cli.run_ablation:main"
 summarize_ablation = "gpis_splatting.cli.summarize_ablation:main"
 run_evaluation = "gpis_splatting.cli.run_evaluation:main"
+prepare_real_scene = "gpis_splatting.cli.prepare_real_scene:main"
+validate_real_scene = "gpis_splatting.cli.validate_real_scene:main"
+evaluate_real_renders = "gpis_splatting.cli.evaluate_real_renders:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -184,6 +184,9 @@ jobs:
           run_ablation --help > /dev/null
           summarize_ablation --help > /dev/null
           run_evaluation --help > /dev/null
+          prepare_real_scene --help > /dev/null
+          validate_real_scene --help > /dev/null
+          evaluate_real_renders --help > /dev/null
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4

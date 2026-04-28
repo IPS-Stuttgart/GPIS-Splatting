@@ -79,6 +79,40 @@ run_evaluation --preset synthetic_ci --experiment-name ci_evaluation
 This chains ablation, summary generation, and evaluation checks. It writes `evaluation_config.json`, `evaluation_checks.csv`, `evaluation_status.json`,
 and `evaluation_report.md` under `experiments/<experiment-name>/`. The GitHub Actions evaluation workflow runs `synthetic_ci` and uploads the report plus summary artifacts.
 
+## Real-Data Benchmark Harness
+
+Prepare a real image/camera scene in the repository's normalized format:
+
+```powershell
+prepare_real_scene `
+  --input-dir C:\datasets\mipnerf360\bicycle `
+  --scene bicycle_sparse12 `
+  --dataset mipnerf360_sparse `
+  --train-view-count 12
+```
+
+The adapter currently supports NeRF-style `transforms.json` and COLMAP text exports containing `cameras.txt` and `images.txt`.
+It writes `real_scenes/<scene>/real_scene.json`, `cameras.json`, `splits.json`, copied images, and `validation.json`.
+
+Validate a prepared scene:
+
+```powershell
+validate_real_scene --scene bicycle_sparse12
+```
+
+Evaluate held-out render images from a method:
+
+```powershell
+evaluate_real_renders `
+  --scene bicycle_sparse12 `
+  --predictions-dir C:\runs\gpis_splatting\bicycle\renders `
+  --method-name gpis_splatting `
+  --benchmark-target benchmarks/mipnerf360_sparse_12view.json
+```
+
+This writes per-image PSNR/SSIM metrics, a summary CSV, and a Markdown report under `real_scenes/<scene>/evaluations/`.
+LPIPS can be enabled with `--compute-lpips true` when the optional `lpips` package is installed.
+
 ## Development
 
 Install the local package and development tools:
@@ -108,6 +142,7 @@ python -m build
 - Ablation runner for comparing feedback iteration counts and selector modes across synthetic shapes
 - Ablation summarizer for PSNR/RMSE/IoU deltas, selector winners, and comparison plots
 - Evaluation workflow for deterministic preset runs, pass/fail checks, report artifacts, and a Mip-NeRF 360 Sparse 12-view target manifest
+- Real-scene preparation and render evaluation harness for NeRF `transforms.json` and COLMAP text camera exports
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
 - Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.
