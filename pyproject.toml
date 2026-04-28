@@ -20,6 +20,7 @@ generate_scene = "gpis_splatting.cli.generate_scene:main"
 fit_gpis = "gpis_splatting.cli.fit_gpis:main"
 render_splats = "gpis_splatting.cli.render_splats:main"
 evaluate = "gpis_splatting.cli.evaluate:main"
+run_ablation = "gpis_splatting.cli.run_ablation:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

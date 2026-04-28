@@ -48,6 +48,14 @@ render_splats --scene torus_demo --view all --feedback-iterations 2
 evaluate --scene torus_demo
 ```
 
+To compare the one-way gate against multiple feedback depths across synthetic shapes:
+
+```powershell
+run_ablation --shapes sphere torus --feedback-iterations 0 1 2
+```
+
+This writes `experiments/feedback_ablation/ablation_metrics.csv` with one row per shape and feedback setting.
+
 ## Development
 
 Install the local package and development tools:
@@ -73,6 +81,7 @@ python -m build
 - Orthographic CPU splat renderer with Beer-Lambert optical-thickness compositing
 - GPIS gate applied as `tau_tilde_i = p_0,epsilon(x_i) * tau_i`
 - Optional bidirectional feedback: high-confidence gated splats become heteroscedastic GPIS zero-level pseudo observations
+- Ablation runner for comparing feedback iteration counts across synthetic shapes
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
 - Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.
