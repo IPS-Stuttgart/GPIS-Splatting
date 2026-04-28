@@ -126,6 +126,22 @@ The bootstrapper reads COLMAP `points3D.txt` or an ASCII `.ply` point cloud. It 
 and optional behind-surface pseudo-SDF observations, `real_splats.npz` with initial colored splats, plus `real_gpis_config.json`
 and `real_bootstrap_report.json`.
 
+Fit the dense GPIS model and render the initialized splats through the prepared real cameras:
+
+```powershell
+fit_real_gpis `
+  --scene bicycle_sparse12 `
+  --max-train-points 1200
+
+render_real_splats `
+  --scene bicycle_sparse12 `
+  --split test `
+  --use-gpis-gate true
+```
+
+This writes `real_gpis_model.npz`, a fit report, held-out render images under `real_scenes/<scene>/renders/real_gpis_gate/`,
+`real_splat_gates.npz`, and `real_render_report.json`. The render directory can be passed directly to `evaluate_real_renders`.
+
 ## Development
 
 Install the local package and development tools:
@@ -157,6 +173,7 @@ python -m build
 - Evaluation workflow for deterministic preset runs, pass/fail checks, report artifacts, and a Mip-NeRF 360 Sparse 12-view target manifest
 - Real-scene preparation and render evaluation harness for NeRF `transforms.json` and COLMAP text camera exports
 - Real-scene GPIS bootstrap from COLMAP `points3D.txt` or ASCII PLY point clouds into pseudo-SDF observations and initial splats
+- Dense real-scene GPIS fitting plus camera-aware real-splat rendering with optional GPIS optical-thickness gates
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
 - Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.

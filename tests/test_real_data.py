@@ -8,7 +8,9 @@ from PIL import Image
 
 from gpis_splatting.cli.bootstrap_real_gpis import main as bootstrap_real_gpis_main
 from gpis_splatting.cli.evaluate_real_renders import main as evaluate_real_renders_main
+from gpis_splatting.cli.fit_real_gpis import main as fit_real_gpis_main
 from gpis_splatting.cli.prepare_real_scene import main as prepare_real_scene_main
+from gpis_splatting.cli.render_real_splats import main as render_real_splats_main
 from gpis_splatting.cli.validate_real_scene import main as validate_real_scene_main
 from gpis_splatting.real_scene import build_sparse_split
 from gpis_splatting.serialization import read_json, write_json
@@ -254,6 +256,74 @@ def test_bootstrap_real_gpis_from_ply_points(tmp_path: Path) -> None:
     assert set(samples["sample_type"].tolist()) == {0, 1}
     assert splats["centers"].shape == (2, 3)
     assert np.allclose(splats["colors"][0], [10 / 255.0, 20 / 255.0, 30 / 255.0])
+
+
+def test_real_gpis_fit_render_and_evaluate_loop(tmp_path: Path) -> None:
+    root = _prepare_colmap_scene_with_points(tmp_path)
+    scene_dir = root / "colmap_bootstrap"
+
+    bootstrap_real_gpis_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--point-source",
+            "colmap",
+            "--free-space-samples-per-point",
+            "1",
+            "--add-behind-surface-samples",
+            "false",
+            "--max-points",
+            "10",
+        ]
+    )
+    fit_real_gpis_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--max-train-points",
+            "6",
+            "--lengthscale",
+            "0.5",
+            "--noise-std",
+            "0.05",
+        ]
+    )
+    render_real_splats_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--split",
+            "train",
+            "--epsilon",
+            "0.2",
+        ]
+    )
+
+    render_dir = scene_dir / "renders" / "real_gpis_gate"
+    report = read_json(render_dir / "real_render_report.json")
+    gates = np.load(render_dir / "real_splat_gates.npz")["gate"]
+    assert (scene_dir / "real_gpis_model.npz").exists()
+    assert (scene_dir / "real_gpis_model_fit_report.json").exists()
+    assert (render_dir / "a.png").exists()
+    assert report["image_count"] == 1
+    assert report["outputs"][0]["drawn_splat_count"] > 0
+    assert np.all((gates >= 0.0) & (gates <= 1.0))
+
+    evaluate_real_renders_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--predictions-dir",
+            str(render_dir),
+            "--method-name",
+            "real_gpis_gate",
+            "--split",
+            "train",
+        ]
+    )
+    metrics = pd.read_csv(scene_dir / "evaluations" / "real_gpis_gate_train_image_metrics.csv")
+    assert len(metrics) == 1
+    assert np.isfinite(metrics["ssim"]).all()
 
 
 def _write_image(path: Path, *, value: int) -> None:
