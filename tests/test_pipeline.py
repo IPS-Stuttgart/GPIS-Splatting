@@ -8,6 +8,7 @@ from gpis_splatting.cli.evaluate import main as evaluate_main
 from gpis_splatting.cli.fit_gpis import main as fit_main
 from gpis_splatting.cli.generate_scene import main as generate_main
 from gpis_splatting.cli.render_splats import main as render_main
+from gpis_splatting.cli.run_ablation import main as ablation_main
 
 
 def test_small_end_to_end_pipeline(tmp_path: Path) -> None:
@@ -83,3 +84,50 @@ def test_small_end_to_end_pipeline(tmp_path: Path) -> None:
     assert metrics["psnr_gpis_front"] >= metrics["psnr_plain_front"]
     assert "psnr_feedback_front" in metrics
     assert "feedback_rmse_sdf" in metrics
+
+
+def test_feedback_ablation_runner_writes_comparison_table(tmp_path: Path) -> None:
+    root = tmp_path / "experiments"
+
+    ablation_main(
+        [
+            "--shapes",
+            "sphere",
+            "--feedback-iterations",
+            "0",
+            "1",
+            "--num-points",
+            "45",
+            "--grid-size",
+            "8",
+            "--image-size",
+            "32",
+            "--num-splats",
+            "55",
+            "--epsilon",
+            "0.11",
+            "--feedback-pseudo-points",
+            "6",
+            "--feedback-min-gate",
+            "0.0",
+            "--output-root",
+            str(root),
+            "--experiment-name",
+            "tiny_ablation",
+        ]
+    )
+
+    out_dir = root / "tiny_ablation"
+    metrics_path = out_dir / "ablation_metrics.csv"
+    assert (out_dir / "ablation_config.json").exists()
+    assert metrics_path.exists()
+    assert (out_dir / "sphere_fb0" / "metrics.csv").exists()
+    assert (out_dir / "sphere_fb1" / "feedback_trace.csv").exists()
+
+    metrics = pd.read_csv(metrics_path)
+    assert list(metrics["feedback_iterations"]) == [0, 1]
+    assert set(metrics["shape"]) == {"sphere"}
+    assert metrics.loc[metrics["feedback_iterations"] == 0, "feedback_selected_splats"].iloc[0] == 0
+    assert metrics.loc[metrics["feedback_iterations"] == 1, "feedback_selected_splats"].iloc[0] == 6
+    assert "psnr_gpis_front" in metrics
+    assert "psnr_feedback_front" in metrics
