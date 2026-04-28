@@ -180,6 +180,7 @@ jobs:
           render_splats --help > /dev/null
           evaluate --help > /dev/null
           run_ablation --help > /dev/null
+          summarize_ablation --help > /dev/null
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4

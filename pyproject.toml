@@ -21,6 +21,7 @@ fit_gpis = "gpis_splatting.cli.fit_gpis:main"
 render_splats = "gpis_splatting.cli.render_splats:main"
 evaluate = "gpis_splatting.cli.evaluate:main"
 run_ablation = "gpis_splatting.cli.run_ablation:main"
+summarize_ablation = "gpis_splatting.cli.summarize_ablation:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
