@@ -126,6 +126,17 @@ The bootstrapper reads COLMAP `points3D.txt` or an ASCII `.ply` point cloud. It 
 and optional behind-surface pseudo-SDF observations, `real_splats.npz` with initial colored splats, plus `real_gpis_config.json`
 and `real_bootstrap_report.json`.
 
+Download a small public real scene for laptop smoke runs:
+
+```powershell
+download_real_scene `
+  --dataset nerfstudio_poster `
+  --image-scale 8 `
+  --max-images 24
+```
+
+This writes a local Nerfstudio `poster` subset under `real_scenes/_downloads/`, including scaled camera intrinsics for `images_8`.
+
 Fit the dense GPIS model and render the initialized splats through the prepared real cameras:
 
 ```powershell
@@ -141,6 +152,23 @@ render_real_splats `
 
 This writes `real_gpis_model.npz`, a fit report, held-out render images under `real_scenes/<scene>/renders/real_gpis_gate/`,
 `real_splat_gates.npz`, and `real_render_report.json`. The render directory can be passed directly to `evaluate_real_renders`.
+
+Run a reproducible real-data plain-vs-gated smoke workflow, including a small parameter sweep:
+
+```powershell
+run_real_evaluation `
+  --scene poster8_smoke `
+  --max-download-images 24 `
+  --max-points 800 `
+  --max-train-points 600 `
+  --max-frames 4 `
+  --epsilons 0.08 0.16 0.24 `
+  --gate-floors 0.0 0.25 `
+  --splat-sigmas 0.015 0.025 0.04
+```
+
+This writes `real_evaluation_comparison.csv`, `real_evaluation_status.json`, and `real_evaluation_report.md` under
+`real_scenes/<scene>/evaluations/`.
 
 ## Development
 
@@ -172,8 +200,10 @@ python -m build
 - Ablation summarizer for PSNR/RMSE/IoU deltas, selector winners, and comparison plots
 - Evaluation workflow for deterministic preset runs, pass/fail checks, report artifacts, and a Mip-NeRF 360 Sparse 12-view target manifest
 - Real-scene preparation and render evaluation harness for NeRF `transforms.json` and COLMAP text camera exports
+- Download adapter for the public Nerfstudio `poster` scene at reduced image scale
 - Real-scene GPIS bootstrap from COLMAP `points3D.txt` or ASCII PLY point clouds into pseudo-SDF observations and initial splats
 - Dense real-scene GPIS fitting plus camera-aware real-splat rendering with optional GPIS optical-thickness gates
+- Reproducible real-data evaluation workflow with plain/gated comparisons, epsilon, splat scale, and gate-floor sweeps
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
 - Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.
