@@ -6,6 +6,8 @@ __all__ = [
     "feedback",
     "splats",
     "renderer",
+    "real_download",
     "real_pipeline",
+    "real_workflow",
     "metrics",
 ]

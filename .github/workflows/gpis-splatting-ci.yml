@@ -187,9 +187,11 @@ jobs:
           prepare_real_scene --help > /dev/null
           validate_real_scene --help > /dev/null
           evaluate_real_renders --help > /dev/null
+          download_real_scene --help > /dev/null
           bootstrap_real_gpis --help > /dev/null
           fit_real_gpis --help > /dev/null
           render_real_splats --help > /dev/null
+          run_real_evaluation --help > /dev/null
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4

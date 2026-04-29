@@ -114,6 +114,7 @@ def render_real_splats(
     split: str = "test",
     use_gpis_gate: bool = True,
     epsilon: float = 0.09,
+    gate_floor: float = 0.0,
     projection_convention: str = "auto",
     near_plane: float = 1e-4,
     kernel_radius: float = 3.0,
@@ -124,6 +125,8 @@ def render_real_splats(
 ) -> dict[str, Any]:
     if projection_convention not in PROJECTION_CONVENTIONS:
         raise ValueError(f"Unsupported projection convention {projection_convention!r}. Expected one of {', '.join(PROJECTION_CONVENTIONS)}.")
+    if not 0.0 <= gate_floor <= 1.0:
+        raise ValueError("gate_floor must be in [0, 1].")
 
     scene_root = Path(scene_dir)
     scene_meta, frames, splits = load_prepared_scene(scene_root)
@@ -134,11 +137,13 @@ def render_real_splats(
 
     splats = load_splats(str(resolved_splats))
     gate = torch.ones_like(splats.tau)
+    raw_gate = gate
     resolved_model: Path | None = None
     gate_path: Path | None = None
     gate_summary = {
         "enabled": False,
         "epsilon": epsilon,
+        "gate_floor": gate_floor,
         "min": 1.0,
         "max": 1.0,
         "mean": 1.0,
@@ -146,13 +151,27 @@ def render_real_splats(
     if use_gpis_gate:
         resolved_model = _resolve_scene_file(scene_root, model_path, "real_gpis_model.npz")
         model, _ = load_model(str(resolved_model))
-        gate = gpis_gate_for_splats(splats, model, epsilon, batch_size=gate_batch_size)
+        raw_gate = gpis_gate_for_splats(splats, model, epsilon, batch_size=gate_batch_size)
+        gate = torch.clamp(gate_floor + (1.0 - gate_floor) * raw_gate, min=0.0, max=1.0)
+        raw_gate_np = raw_gate.detach().cpu().numpy()
         gate_np = gate.detach().cpu().numpy()
         gate_path = resolved_output / "real_splat_gates.npz"
-        np.savez_compressed(gate_path, gate=gate_np, epsilon=np.array(epsilon), splats_path=np.array(str(resolved_splats)), model_path=np.array(str(resolved_model)))
+        np.savez_compressed(
+            gate_path,
+            gate=gate_np,
+            raw_gate=raw_gate_np,
+            epsilon=np.array(epsilon),
+            gate_floor=np.array(gate_floor),
+            splats_path=np.array(str(resolved_splats)),
+            model_path=np.array(str(resolved_model)),
+        )
         gate_summary = {
             "enabled": True,
             "epsilon": epsilon,
+            "gate_floor": gate_floor,
+            "raw_min": float(raw_gate_np.min()) if raw_gate_np.size else 0.0,
+            "raw_max": float(raw_gate_np.max()) if raw_gate_np.size else 0.0,
+            "raw_mean": float(raw_gate_np.mean()) if raw_gate_np.size else 0.0,
             "min": float(gate_np.min()) if gate_np.size else 0.0,
             "max": float(gate_np.max()) if gate_np.size else 0.0,
             "mean": float(gate_np.mean()) if gate_np.size else 0.0,
@@ -203,6 +222,7 @@ def render_real_splats(
         "gate_path": str(gate_path) if gate_path is not None else None,
         "use_gpis_gate": use_gpis_gate,
         "gate_summary": gate_summary,
+        "gate_floor": gate_floor,
         "splat_count": int(splats.centers.shape[0]),
         "image_count": len(outputs),
         "near_plane": near_plane,

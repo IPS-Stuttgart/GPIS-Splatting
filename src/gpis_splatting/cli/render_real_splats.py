@@ -34,6 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--split", default="test", help="Scene split to render, or all.")
     parser.add_argument("--use-gpis-gate", type=str_to_bool, default=True)
     parser.add_argument("--epsilon", type=float, default=0.09)
+    parser.add_argument("--gate-floor", type=float, default=0.0, help="Minimum multiplicative gate applied before optical thickness.")
     parser.add_argument("--projection-convention", choices=PROJECTION_CONVENTIONS, default="auto")
     parser.add_argument("--near-plane", type=float, default=1e-4)
     parser.add_argument("--kernel-radius", type=float, default=3.0)
@@ -59,6 +60,7 @@ def main(argv: list[str] | None = None) -> None:
         split=args.split,
         use_gpis_gate=args.use_gpis_gate,
         epsilon=args.epsilon,
+        gate_floor=args.gate_floor,
         projection_convention=args.projection_convention,
         near_plane=args.near_plane,
         kernel_radius=args.kernel_radius,
