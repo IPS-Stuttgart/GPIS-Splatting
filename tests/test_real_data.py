@@ -9,6 +9,7 @@ from PIL import Image
 
 from gpis_splatting.cli.bootstrap_real_gpis import main as bootstrap_real_gpis_main
 from gpis_splatting.cli.diagnose_real_render import main as diagnose_real_render_main
+from gpis_splatting.cli.diagnose_tanks_temples_gpis_field_scores import main as diagnose_tanks_temples_gpis_field_scores_main
 from gpis_splatting.cli.diagnose_tanks_temples_gates import main as diagnose_tanks_temples_gates_main
 from gpis_splatting.cli.evaluate_real_renders import main as evaluate_real_renders_main
 from gpis_splatting.cli.evaluate_tanks_temples_geometry import main as evaluate_tanks_temples_geometry_main
@@ -787,6 +788,92 @@ def test_run_real_gpis_gate_model_sweep_existing_cli(tmp_path: Path) -> None:
     assert status["failure_count"] == 0
     assert status["best_by_gate_error_spearman"][0]["construction_mode"] == "existing"
     assert (sweep_dir / "toy_model_sweep_report.md").exists()
+
+
+def test_diagnose_tanks_temples_gpis_field_scores_cli(tmp_path: Path) -> None:
+    source = _write_tanks_temples_fixture(tmp_path / "tanks_temples" / "Ignatius")
+    root = tmp_path / "real_scenes"
+    prepare_tanks_temples_scene_main(
+        [
+            "--input-dir",
+            str(source),
+            "--prepared-scene",
+            "ignatius_field_scores",
+            "--output-root",
+            str(root),
+            "--train-view-count",
+            "2",
+        ]
+    )
+    scene_dir = root / "ignatius_field_scores"
+    _write_toy_splats_and_gates(scene_dir)
+    _write_toy_real_samples(scene_dir)
+    fit_real_gpis_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--samples-path",
+            "toy_samples.npz",
+            "--output-model",
+            "toy_model.npz",
+            "--lengthscale",
+            "0.3",
+            "--noise-std",
+            "0.05",
+            "--max-train-points",
+            "0",
+        ]
+    )
+
+    diagnose_tanks_temples_gpis_field_scores_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--splats-path",
+            "toy_splats.npz",
+            "--model-path",
+            "toy_model.npz",
+            "--method-name",
+            "toy_field",
+            "--thresholds",
+            "0.05",
+            "--topk-fractions",
+            "0.34",
+            "1.0",
+            "--score-lambdas",
+            "0.5",
+            "--max-gt-points",
+            "0",
+            "--max-pred-points",
+            "0",
+            "--distance-chunk-size",
+            "2",
+        ]
+    )
+
+    fields = pd.read_csv(scene_dir / "evaluations" / "toy_field_gpis_field_scores.csv")
+    summary = pd.read_csv(scene_dir / "evaluations" / "toy_field_gpis_field_score_summary.csv")
+    ranked = pd.read_csv(scene_dir / "evaluations" / "toy_field_gpis_field_score_ranked.csv")
+    status = read_json(scene_dir / "evaluations" / "toy_field_gpis_field_score_status.json")
+    expected_scores = {
+        "score_current_gate",
+        "score_raw_surface_band",
+        "score_exp_neg_abs_distance",
+        "score_negative_abs_distance",
+        "score_negative_distance_std",
+        "score_variance_penalized_band",
+        "score_variance_penalized_exp",
+        "score_negative_abs_mu",
+        "score_combined_distance_uncertainty_l0p5",
+    }
+    assert {"mu", "sigma", "grad_norm", "signed_distance", "distance_std", "nearest_gt_distance"}.issubset(fields.columns)
+    assert expected_scores.issubset(fields.columns)
+    assert expected_scores.issubset(set(summary["score_name"]))
+    assert expected_scores.issubset(set(ranked["score_name"]))
+    assert status["pred_count_evaluated"] == 3
+    assert status["best_by_spearman"]
+    assert status["best_by_delta_f_score"]
+    assert (scene_dir / "evaluations" / "toy_field_gpis_field_score_report.md").exists()
 
 
 def _write_image(path: Path, *, value: int) -> None:

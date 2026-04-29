@@ -244,6 +244,20 @@ diagnose_tanks_temples_gates `
 This writes per-splat nearest-ground-truth distances, Spearman/Pearson gate-error correlations, gate-sorted retention curves,
 and calibration-style gate bins under `real_scenes/<scene>/evaluations/`.
 
+Diagnose whether the GPIS field is useful through another score even when the current gate is weak:
+
+```powershell
+diagnose_tanks_temples_gpis_field_scores `
+  --scene ignatius_tnt64 `
+  --splats-path real20k_sigma_0p04_splats.npz `
+  --model-path real20k_sigma_0p04_gpis_model.npz `
+  --thresholds 0.02 0.05 0.1 `
+  --score-lambdas 0.25 0.5 1.0
+```
+
+This evaluates GPIS posterior mean, variance, gradient norm, signed-distance proxy, distance uncertainty, the current gate,
+and alternative distance/uncertainty scores at every splat center, then ranks those scores against nearest-ground-truth error.
+
 Sweep GPIS pseudo-SDF construction and model hyperparameters against those gate-quality diagnostics:
 
 ```powershell
@@ -302,6 +316,7 @@ python -m build
 - Tanks and Temples geometry evaluator with alignment/crop handling, Chamfer, precision, recall, F-score, and gate-stratified slices
 - Gate-threshold geometry sweeps for checking whether GPIS confidence is useful for selecting splats
 - Gate quality diagnostics for checking whether GPIS confidence ranks and calibrates splat geometry error
+- GPIS field score diagnostics for testing whether posterior mean, uncertainty, distance, or combined scores rank splat geometry error better than the current gate
 - Real GPIS gate model sweeps over pseudo-SDF construction modes, GPIS hyperparameters, epsilon, and gate floors
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
