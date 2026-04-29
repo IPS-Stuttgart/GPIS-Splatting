@@ -9,6 +9,7 @@ from PIL import Image
 
 from gpis_splatting.cli.bootstrap_real_gpis import main as bootstrap_real_gpis_main
 from gpis_splatting.cli.diagnose_real_render import main as diagnose_real_render_main
+from gpis_splatting.cli.diagnose_tanks_temples_gates import main as diagnose_tanks_temples_gates_main
 from gpis_splatting.cli.evaluate_real_renders import main as evaluate_real_renders_main
 from gpis_splatting.cli.evaluate_tanks_temples_geometry import main as evaluate_tanks_temples_geometry_main
 from gpis_splatting.cli.fit_real_gpis import main as fit_real_gpis_main
@@ -649,6 +650,72 @@ def test_run_tanks_temples_gate_sweep_cli(tmp_path: Path) -> None:
     assert np.isclose(gate_085["retention_fraction"], 1 / 3)
     assert status["best_by_f_score"][0]["gate_threshold"] == 0.5
     assert (scene_dir / "evaluations" / "toy_sweep_gate_sweep_report.md").exists()
+
+
+def test_diagnose_tanks_temples_gates_cli(tmp_path: Path) -> None:
+    source = _write_tanks_temples_fixture(tmp_path / "tanks_temples" / "Ignatius")
+    root = tmp_path / "real_scenes"
+    prepare_tanks_temples_scene_main(
+        [
+            "--input-dir",
+            str(source),
+            "--prepared-scene",
+            "ignatius_gate_quality",
+            "--output-root",
+            str(root),
+            "--train-view-count",
+            "2",
+        ]
+    )
+    scene_dir = root / "ignatius_gate_quality"
+    _write_toy_splats_and_gates(scene_dir)
+
+    diagnose_tanks_temples_gates_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--splats-path",
+            "toy_splats.npz",
+            "--gate-path",
+            "toy_gates.npz",
+            "--method-name",
+            "toy",
+            "--thresholds",
+            "0.05",
+            "--topk-fractions",
+            "0.34",
+            "1.0",
+            "--num-bins",
+            "2",
+            "--max-gt-points",
+            "0",
+            "--max-pred-points",
+            "0",
+            "--distance-chunk-size",
+            "2",
+        ]
+    )
+
+    splats = pd.read_csv(scene_dir / "evaluations" / "toy_gate_quality_splats.csv")
+    ranked = pd.read_csv(scene_dir / "evaluations" / "toy_gate_quality_ranked.csv")
+    bins = pd.read_csv(scene_dir / "evaluations" / "toy_gate_quality_bins.csv")
+    status = read_json(scene_dir / "evaluations" / "toy_gate_quality_status.json")
+    assert np.allclose(splats.sort_values("splat_index")["nearest_gt_distance"].iloc[:2], 0.0)
+    assert splats.sort_values("splat_index")["nearest_gt_distance"].iloc[2] > 1.0
+    assert status["correlations"]["spearman_gate_vs_negative_distance"] > 0.8
+    assert status["best_topk_by_f_score"][0]["topk_fraction"] == 0.34
+    top_two = ranked[ranked["topk_fraction"] == 0.34].iloc[0]
+    full = ranked[ranked["topk_fraction"] == 1.0].iloc[0]
+    assert np.isclose(top_two["precision"], 1.0)
+    assert np.isclose(top_two["recall"], 1.0)
+    assert np.isclose(top_two["f_score"], 1.0)
+    assert np.isclose(full["precision"], 2 / 3)
+    assert np.isclose(full["f_score"], 0.8)
+    low_bin = bins[bins["bin_index"] == 0].iloc[0]
+    high_bin = bins[bins["bin_index"] == 1].iloc[0]
+    assert np.isclose(low_bin["within_threshold_fraction"], 0.0)
+    assert np.isclose(high_bin["within_threshold_fraction"], 1.0)
+    assert (scene_dir / "evaluations" / "toy_gate_quality_report.md").exists()
 
 
 def _write_image(path: Path, *, value: int) -> None:

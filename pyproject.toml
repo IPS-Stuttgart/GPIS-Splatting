@@ -36,6 +36,7 @@ download_tanks_temples_scene = "gpis_splatting.cli.download_tanks_temples_scene:
 prepare_tanks_temples_scene = "gpis_splatting.cli.prepare_tanks_temples_scene:main"
 evaluate_tanks_temples_geometry = "gpis_splatting.cli.evaluate_tanks_temples_geometry:main"
 run_tanks_temples_gate_sweep = "gpis_splatting.cli.run_tanks_temples_gate_sweep:main"
+diagnose_tanks_temples_gates = "gpis_splatting.cli.diagnose_tanks_temples_gates:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
