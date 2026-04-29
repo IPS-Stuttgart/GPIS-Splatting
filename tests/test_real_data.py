@@ -11,10 +11,12 @@ from gpis_splatting.cli.diagnose_real_render import main as diagnose_real_render
 from gpis_splatting.cli.evaluate_real_renders import main as evaluate_real_renders_main
 from gpis_splatting.cli.fit_real_gpis import main as fit_real_gpis_main
 from gpis_splatting.cli.prepare_real_scene import main as prepare_real_scene_main
+from gpis_splatting.cli.prepare_tanks_temples_scene import main as prepare_tanks_temples_scene_main
 from gpis_splatting.cli.render_real_splats import main as render_real_splats_main
 from gpis_splatting.cli.validate_real_scene import main as validate_real_scene_main
 from gpis_splatting.real_scene import build_sparse_split
 from gpis_splatting.serialization import read_json, write_json
+from gpis_splatting.tanks_temples import read_tanks_temples_log
 
 
 def test_prepare_validate_and_evaluate_transforms_scene(tmp_path: Path) -> None:
@@ -395,6 +397,58 @@ def test_real_render_diagnostics_outputs_visuals_and_metrics(tmp_path: Path) -> 
     assert (diagnostics_dir / "real_render_diagnostics.md").exists()
 
 
+def test_prepare_tanks_temples_scene_from_log_fixture(tmp_path: Path) -> None:
+    source = _write_tanks_temples_fixture(tmp_path / "tanks_temples" / "Ignatius")
+    root = tmp_path / "real_scenes"
+
+    prepare_tanks_temples_scene_main(
+        [
+            "--input-dir",
+            str(source),
+            "--prepared-scene",
+            "ignatius_fixture",
+            "--output-root",
+            str(root),
+            "--train-view-count",
+            "2",
+        ]
+    )
+
+    scene_dir = root / "ignatius_fixture"
+    scene_meta = read_json(scene_dir / "real_scene.json")
+    cameras = read_json(scene_dir / "cameras.json")
+    splits = read_json(scene_dir / "splits.json")
+    validation = read_json(scene_dir / "validation.json")
+    assert scene_meta["dataset"] == "tanks_temples"
+    assert scene_meta["source_format"] == "tanks_temples_log"
+    assert scene_meta["tanks_temples"]["intrinsics_source"] == "tanks_temples_download_page_recommended_pinhole"
+    assert Path(scene_meta["tanks_temples"]["reconstruction_path"]).parts[-2:] == ("reconstruction", "Ignatius.ply")
+    assert Path(scene_meta["tanks_temples"]["ground_truth_path"]).parts[-2:] == ("ground_truth", "Ignatius.ply")
+    assert validation["passed"] is True
+    assert splits["train"] == [0, 2]
+    assert splits["test"] == [1]
+    assert len(cameras["frames"]) == 3
+    first = cameras["frames"][0]
+    assert first["intrinsics"]["fx"] == 5.6
+    assert first["intrinsics"]["fy"] == 5.6
+    assert first["intrinsics"]["cx"] == 4.0
+    assert first["intrinsics"]["cy"] == 3.0
+    assert first["camera_to_world"][2][3] == 1.0
+    assert first["world_to_camera"][2][3] == -1.0
+    assert (scene_dir / "images" / "000000.jpg").exists()
+
+
+def test_read_tanks_temples_log_rejects_incomplete_pose(tmp_path: Path) -> None:
+    log_path = tmp_path / "bad.log"
+    log_path.write_text("0 0 0\n1 0 0 0\n", encoding="utf-8")
+    try:
+        read_tanks_temples_log(log_path)
+    except ValueError as exc:
+        assert "five lines per pose" in str(exc)
+    else:
+        raise AssertionError("Expected malformed Tanks and Temples log to fail.")
+
+
 def _write_image(path: Path, *, value: int) -> None:
     data = np.full((6, 8, 3), value, dtype=np.uint8)
     Image.fromarray(data, mode="RGB").save(path)
@@ -466,3 +520,72 @@ def _prepare_colmap_scene_with_points(tmp_path: Path) -> Path:
         ]
     )
     return root
+
+
+def _write_tanks_temples_fixture(root: Path) -> Path:
+    image_dir = root / "image_sets" / "Ignatius"
+    image_dir.mkdir(parents=True)
+    width, height = 8, 6
+    for index in range(3):
+        data = np.zeros((height, width, 3), dtype=np.uint8)
+        data[..., 0] = 40 + index * 20
+        data[..., 1] = np.arange(height, dtype=np.uint8)[:, None] * 20
+        data[..., 2] = np.arange(width, dtype=np.uint8)[None, :] * 20
+        Image.fromarray(data, mode="RGB").save(image_dir / f"{index:06d}.jpg")
+
+    (root / "camera_poses").mkdir()
+    (root / "camera_poses" / "Ignatius.log").write_text(
+        "\n".join(
+            [
+                "0 0 0",
+                "1 0 0 0",
+                "0 1 0 0",
+                "0 0 1 1",
+                "0 0 0 1",
+                "1 1 0",
+                "1 0 0 0.1",
+                "0 1 0 0",
+                "0 0 1 1",
+                "0 0 0 1",
+                "2 2 0",
+                "1 0 0 0.2",
+                "0 1 0 0",
+                "0 0 1 1",
+                "0 0 0 1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    for directory, suffix, content in (
+        ("reconstruction", ".ply", _tiny_ascii_ply()),
+        ("ground_truth", ".ply", _tiny_ascii_ply()),
+        ("alignment", ".txt", "1 0 0 0\n0 1 0 0\n0 0 1 0\n0 0 0 1\n"),
+        ("crop", ".json", '{"min": [-1, -1, -1], "max": [1, 1, 1]}'),
+    ):
+        target_dir = root / directory
+        target_dir.mkdir()
+        (target_dir / f"Ignatius{suffix}").write_text(content, encoding="utf-8")
+    return root
+
+
+def _tiny_ascii_ply() -> str:
+    return (
+        "\n".join(
+            [
+                "ply",
+                "format ascii 1.0",
+                "element vertex 2",
+                "property float x",
+                "property float y",
+                "property float z",
+                "property uchar red",
+                "property uchar green",
+                "property uchar blue",
+                "end_header",
+                "0 0 1 255 0 0",
+                "0.1 0 1 0 255 0",
+            ]
+        )
+        + "\n"
+    )
