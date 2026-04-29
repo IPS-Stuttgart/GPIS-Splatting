@@ -8,6 +8,7 @@ import torch
 from PIL import Image
 
 from gpis_splatting.cli.bootstrap_real_gpis import main as bootstrap_real_gpis_main
+from gpis_splatting.cli.calibrate_gpis_splat_scores import main as calibrate_gpis_splat_scores_main
 from gpis_splatting.cli.diagnose_real_render import main as diagnose_real_render_main
 from gpis_splatting.cli.diagnose_tanks_temples_gpis_field_scores import main as diagnose_tanks_temples_gpis_field_scores_main
 from gpis_splatting.cli.diagnose_tanks_temples_gates import main as diagnose_tanks_temples_gates_main
@@ -874,6 +875,34 @@ def test_diagnose_tanks_temples_gpis_field_scores_cli(tmp_path: Path) -> None:
     assert status["best_by_spearman"]
     assert status["best_by_delta_f_score"]
     assert (scene_dir / "evaluations" / "toy_field_gpis_field_score_report.md").exists()
+
+    calibrate_gpis_splat_scores_main(
+        [
+            "--field-scores-path",
+            str(scene_dir / "evaluations" / "toy_field_gpis_field_scores.csv"),
+            "--method-name",
+            "toy_calibrated",
+            "--thresholds",
+            "0.05",
+            "--topk-fractions",
+            "0.34",
+            "1.0",
+            "--validation-fraction",
+            "0.34",
+            "--logistic-iterations",
+            "50",
+        ]
+    )
+
+    calibration_summary = pd.read_csv(scene_dir / "evaluations" / "toy_calibrated_calibration_summary.csv")
+    calibrated_scores = pd.read_csv(scene_dir / "evaluations" / "toy_calibrated_calibrated_splat_scores.csv")
+    calibration_status = read_json(scene_dir / "evaluations" / "toy_calibrated_calibration_status.json")
+    assert {"logistic", "isotonic", "score_minmax"}.issubset(set(calibration_summary["method_family"]))
+    assert "confidence_0p05" in calibrated_scores.columns
+    assert calibrated_scores["confidence_0p05"].between(0.0, 1.0).all()
+    assert calibration_status["best_by_threshold"]
+    assert (scene_dir / "evaluations" / "toy_calibrated_calibrated_confidence.npz").exists()
+    assert (scene_dir / "evaluations" / "toy_calibrated_calibration_report.md").exists()
 
 
 def _write_image(path: Path, *, value: int) -> None:
