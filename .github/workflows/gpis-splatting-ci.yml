@@ -193,6 +193,8 @@ jobs:
           render_real_splats --help > /dev/null
           run_real_evaluation --help > /dev/null
           diagnose_real_render --help > /dev/null
+          download_tanks_temples_scene --help > /dev/null
+          prepare_tanks_temples_scene --help > /dev/null
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v7

@@ -185,6 +185,24 @@ This writes target/plain/gated panels, projected-splat overlays, depth visualiza
 `real_render_diagnostics.csv`, and `real_render_diagnostics.md` under `real_scenes/<scene>/diagnostics/real_render/`.
 Existing render directories can be passed with `--plain-renders-dir` and `--gated-renders-dir` to diagnose already-generated outputs.
 
+Download and prepare the Tanks and Temples `Ignatius` training scene for geometry-oriented GPIS experiments:
+
+```powershell
+download_tanks_temples_scene `
+  --scene Ignatius `
+  --output-root real_scenes/_downloads `
+  --max-images 64
+
+prepare_tanks_temples_scene `
+  --input-dir real_scenes/_downloads/tanks_temples/Ignatius `
+  --prepared-scene ignatius_tnt64 `
+  --train-view-count 12
+```
+
+The downloader records official Tanks and Temples provenance and license URLs. The preparer reads the Redwood `.log` camera trajectory,
+uses the dataset's recommended pinhole initialization (`fx=fy=0.7*W`, `cx=W/2`, `cy=H/2`), stores paths to the COLMAP reconstruction,
+alignment, crop, and ground-truth geometry when present, and writes the normalized `real_scene.json`, `cameras.json`, and `splits.json`.
+
 ## Development
 
 Install the local package and development tools:
@@ -220,6 +238,7 @@ python -m build
 - Dense real-scene GPIS fitting plus camera-aware real-splat rendering with optional GPIS optical-thickness gates
 - Reproducible real-data evaluation workflow with plain/gated comparisons, epsilon, splat scale, and gate-floor sweeps
 - Real-render diagnostics with target/plain/gated panels, projected splats, depth views, gate overlays, histograms, and per-frame visibility/metric CSVs
+- Tanks and Temples `Ignatius` downloader and `.log` pose adapter for geometry-oriented real-data experiments
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
 - Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.

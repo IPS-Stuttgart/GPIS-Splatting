@@ -157,7 +157,12 @@ def resolve_point_source(
         return point_source, path
 
     source_dir = Path(scene_meta.get("source_dir", scene_root))
-    candidates = [
+    tanks_temples_meta = scene_meta.get("tanks_temples") or {}
+    tanks_temples_reconstruction = tanks_temples_meta.get("reconstruction_path")
+    candidates = []
+    if tanks_temples_reconstruction:
+        candidates.append((Path(tanks_temples_reconstruction), "ply"))
+    candidates.extend([
         (source_dir / "sparse" / "0" / "points3D.txt", "colmap"),
         (source_dir / "sparse" / "points3D.txt", "colmap"),
         (source_dir / "points3D.txt", "colmap"),
@@ -166,7 +171,7 @@ def resolve_point_source(
         (source_dir / "sparse" / "0" / "points3D.ply", "ply"),
         (source_dir / "point_cloud.ply", "ply"),
         (scene_root / "point_cloud.ply", "ply"),
-    ]
+    ])
     for candidate, candidate_source in candidates:
         if candidate.exists() and point_source in {"auto", candidate_source}:
             return candidate_source, candidate
