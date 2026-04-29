@@ -482,6 +482,7 @@ def classification_metrics(labels: np.ndarray, probabilities: np.ndarray, *, num
         "nll": float(-np.mean(labels * np.log(probabilities) + (1.0 - labels) * np.log(1.0 - probabilities))),
         "ece": expected_calibration_error(labels, probabilities, num_bins=num_bins),
         "auc": roc_auc(labels, probabilities),
+        "average_precision": average_precision(labels, probabilities),
         "spearman_probability_vs_label": finite_or_none(correlation(rankdata_average(probabilities), rankdata_average(labels))),
         "mean_probability": float(probabilities.mean()),
     }
@@ -513,6 +514,19 @@ def roc_auc(labels: np.ndarray, probabilities: np.ndarray) -> float | None:
     ranks = rankdata_average(probabilities)
     auc = (float(ranks[positive].sum()) - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg)
     return float(auc)
+
+
+def average_precision(labels: np.ndarray, probabilities: np.ndarray) -> float | None:
+    labels = np.asarray(labels, dtype=np.float64)
+    probabilities = np.asarray(probabilities, dtype=np.float64)
+    positives = float(labels.sum())
+    if positives <= 0.0:
+        return None
+    order = np.argsort(-probabilities, kind="mergesort")
+    sorted_labels = labels[order]
+    true_positives = np.cumsum(sorted_labels)
+    precision = true_positives / np.arange(1, sorted_labels.shape[0] + 1, dtype=np.float64)
+    return float(np.sum(precision * sorted_labels) / positives)
 
 
 def ranked_label_selection(
@@ -572,6 +586,7 @@ def select_best_method(summary_rows: list[dict[str, Any]]) -> dict[str, Any]:
         "nll": float(row["nll"]),
         "ece": float(row["ece"]),
         "auc": maybe_float(row["auc"]),
+        "average_precision": maybe_float(row["average_precision"]),
         "best_topk_fraction": float(row["best_topk_fraction"]),
         "best_f_score": float(row["best_f_score"]),
     }
@@ -597,7 +612,7 @@ def format_calibration_report(status: dict[str, Any], summary: pd.DataFrame) -> 
         lines.append(
             f"- threshold `{row['geometry_threshold']:.6g}`: `{row['method_name']}` "
             f"Brier `{row['brier']:.6g}`, NLL `{row['nll']:.6g}`, ECE `{row['ece']:.6g}`, "
-            f"AUC `{format_optional(row['auc'])}`, best F-score `{row['best_f_score']:.6g}`"
+            f"AUC `{format_optional(row['auc'])}`, AP `{format_optional(row['average_precision'])}`, best F-score `{row['best_f_score']:.6g}`"
         )
     if not summary.empty:
         lines.extend(["", "## Summary Table", "", format_summary_table(summary)])
@@ -605,16 +620,16 @@ def format_calibration_report(status: dict[str, Any], summary: pd.DataFrame) -> 
 
 
 def format_summary_table(summary: pd.DataFrame) -> str:
-    columns = ["geometry_threshold", "method_name", "method_family", "brier", "nll", "ece", "auc", "best_topk_fraction", "best_f_score"]
+    columns = ["geometry_threshold", "method_name", "method_family", "brier", "nll", "ece", "auc", "average_precision", "best_topk_fraction", "best_f_score"]
     lines = [
-        "| threshold | method | family | brier | nll | ece | auc | top_k | best_f |",
-        "| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| threshold | method | family | brier | nll | ece | auc | ap | top_k | best_f |",
+        "| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     sorted_summary = summary[columns].sort_values(["geometry_threshold", "brier", "best_f_score"], ascending=[True, True, False])
     for row in sorted_summary.itertuples(index=False):
         lines.append(
             f"| {row.geometry_threshold:.6g} | `{row.method_name}` | `{row.method_family}` | {row.brier:.6g} | {row.nll:.6g} | "
-            f"{row.ece:.6g} | {format_optional(row.auc)} | {row.best_topk_fraction:.6g} | {row.best_f_score:.6g} |"
+            f"{row.ece:.6g} | {format_optional(row.auc)} | {format_optional(row.average_precision)} | {row.best_topk_fraction:.6g} | {row.best_f_score:.6g} |"
         )
     return "\n".join(lines)
 

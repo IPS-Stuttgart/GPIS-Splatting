@@ -271,6 +271,21 @@ This consumes the per-splat field-score CSV, builds labels such as `nearest_gt_d
 isotonic calibration, and logistic calibration over GPIS posterior features, then writes validation metrics, top-k retention curves,
 calibrated splat confidences, and a report under `real_scenes/<scene>/evaluations/`.
 
+Run a harder mixed-candidate calibration workflow with generated off-surface splat candidates:
+
+```powershell
+run_tanks_temples_hard_negative_calibration `
+  --scene ignatius_tnt64 `
+  --splats-path real20k_sigma_0p04_splats.npz `
+  --model-path real20k_sigma_0p04_gpis_model.npz `
+  --method-name ignatius_hard_negative_v1 `
+  --thresholds 0.02 0.05 0.1
+```
+
+This creates source, jittered, camera-ray, behind-surface, and crop-random candidate splats, scores the mixed set with GPIS field
+diagnostics, and calibrates splat confidence on nearest-ground-truth labels. The workflow is intended to test whether GPIS-derived
+confidence rejects floating or off-surface artifacts, rather than mostly ranking already-good source splats.
+
 Sweep GPIS pseudo-SDF construction and model hyperparameters against those gate-quality diagnostics:
 
 ```powershell
@@ -331,6 +346,7 @@ python -m build
 - Gate quality diagnostics for checking whether GPIS confidence ranks and calibrates splat geometry error
 - GPIS field score diagnostics for testing whether posterior mean, uncertainty, distance, or combined scores rank splat geometry error better than the current gate
 - GPIS-derived splat confidence calibration with current-score baselines, isotonic calibration, and logistic feature models
+- Hard-negative real-splat workflow that generates off-surface candidates, scores them with GPIS, and calibrates confidence on mixed source/negative sets
 - Real GPIS gate model sweeps over pseudo-SDF construction modes, GPIS hyperparameters, epsilon, and gate floors
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
