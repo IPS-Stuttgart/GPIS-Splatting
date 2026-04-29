@@ -113,6 +113,35 @@ evaluate_real_renders `
 This writes per-image PSNR/SSIM metrics, a summary CSV, and a Markdown report under `real_scenes/<scene>/evaluations/`.
 LPIPS can be enabled with `--compute-lpips true` when the optional `lpips` package is installed.
 
+Bootstrap first GPIS observations and initial splats from sparse real geometry:
+
+```powershell
+bootstrap_real_gpis `
+  --scene bicycle_sparse12 `
+  --point-source auto `
+  --max-points 5000
+```
+
+The bootstrapper reads COLMAP `points3D.txt` or an ASCII `.ply` point cloud. It writes `real_samples.npz` with surface, free-space,
+and optional behind-surface pseudo-SDF observations, `real_splats.npz` with initial colored splats, plus `real_gpis_config.json`
+and `real_bootstrap_report.json`.
+
+Fit the dense GPIS model and render the initialized splats through the prepared real cameras:
+
+```powershell
+fit_real_gpis `
+  --scene bicycle_sparse12 `
+  --max-train-points 1200
+
+render_real_splats `
+  --scene bicycle_sparse12 `
+  --split test `
+  --use-gpis-gate true
+```
+
+This writes `real_gpis_model.npz`, a fit report, held-out render images under `real_scenes/<scene>/renders/real_gpis_gate/`,
+`real_splat_gates.npz`, and `real_render_report.json`. The render directory can be passed directly to `evaluate_real_renders`.
+
 ## Development
 
 Install the local package and development tools:
@@ -143,6 +172,8 @@ python -m build
 - Ablation summarizer for PSNR/RMSE/IoU deltas, selector winners, and comparison plots
 - Evaluation workflow for deterministic preset runs, pass/fail checks, report artifacts, and a Mip-NeRF 360 Sparse 12-view target manifest
 - Real-scene preparation and render evaluation harness for NeRF `transforms.json` and COLMAP text camera exports
+- Real-scene GPIS bootstrap from COLMAP `points3D.txt` or ASCII PLY point clouds into pseudo-SDF observations and initial splats
+- Dense real-scene GPIS fitting plus camera-aware real-splat rendering with optional GPIS optical-thickness gates
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
 - Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.
