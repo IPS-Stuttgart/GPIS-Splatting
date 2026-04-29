@@ -42,7 +42,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -68,7 +68,7 @@ jobs:
         run: cat "evaluation_runs/${EVAL_EXPERIMENT}/evaluation_report.md" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload evaluation artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gpis-evaluation-${{ env.EVAL_PRESET }}
           path: |
