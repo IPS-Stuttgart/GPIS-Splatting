@@ -364,6 +364,30 @@ def test_real_gpis_fit_render_and_evaluate_loop(tmp_path: Path) -> None:
     assert report["outputs"][0]["drawn_splat_count"] > 0
     assert np.all((gates >= 0.0) & (gates <= 1.0))
 
+    np.savez_compressed(scene_dir / "external_gate.npz", gate=np.asarray([1.0, 0.0, 0.5], dtype=np.float64))
+    render_real_splats_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--splats-path",
+            "real_splats.npz",
+            "--gate-path",
+            "external_gate.npz",
+            "--method-name",
+            "external_confidence_gate",
+            "--split",
+            "train",
+            "--use-gpis-gate",
+            "false",
+        ]
+    )
+    external_render_dir = scene_dir / "renders" / "external_confidence_gate"
+    external_report = read_json(external_render_dir / "real_render_report.json")
+    external_gates = np.load(external_render_dir / "real_splat_gates.npz")["gate"]
+    assert external_report["gate_summary"]["source"] == "external"
+    assert external_report["input_gate_path"].endswith("external_gate.npz")
+    assert np.allclose(external_gates, [1.0, 0.0, 0.5])
+
     evaluate_real_renders_main(
         [
             "--scene-dir",
@@ -892,6 +916,10 @@ def test_diagnose_tanks_temples_gpis_field_scores_cli(tmp_path: Path) -> None:
             "0.34",
             "--logistic-iterations",
             "50",
+            "--gate-count",
+            "5",
+            "--missing-gate-value",
+            "0.25",
         ]
     )
 
@@ -902,7 +930,16 @@ def test_diagnose_tanks_temples_gpis_field_scores_cli(tmp_path: Path) -> None:
     assert "confidence_0p05" in calibrated_scores.columns
     assert calibrated_scores["confidence_0p05"].between(0.0, 1.0).all()
     assert calibration_status["best_by_threshold"]
+    assert calibration_status["gate_count"] == 5
+    assert calibration_status["gate_scored_count"] == 3
+    assert calibration_status["gate_missing_count"] == 2
     assert (scene_dir / "evaluations" / "toy_calibrated_calibrated_confidence.npz").exists()
+    calibrated_gate = np.load(scene_dir / "evaluations" / "toy_calibrated_gate_0p05.npz")
+    assert calibrated_gate["gate"].shape == (5,)
+    assert calibrated_gate["scored_mask"].tolist() == [True, True, True, False, False]
+    assert np.allclose(calibrated_gate["gate"][3:], 0.25)
+    assert calibrated_gate["gate"].min() >= 0.0
+    assert calibrated_gate["gate"].max() <= 1.0
     assert (scene_dir / "evaluations" / "toy_calibrated_calibration_report.md").exists()
 
 
@@ -988,6 +1025,9 @@ def test_run_tanks_temples_hard_negative_calibration_cli(tmp_path: Path) -> None
     assert status["best_calibrators"]
     assert (eval_dir / "toy_hard_hard_negative_splats.npz").exists()
     assert (eval_dir / "toy_hard_hard_negative_calibrated_calibrated_confidence.npz").exists()
+    hard_gate = np.load(eval_dir / "toy_hard_hard_negative_calibrated_gate_0p05.npz")
+    assert hard_gate["gate"].shape == (candidates.shape[0],)
+    assert hard_gate["scored_mask"].sum() == fields.shape[0]
     assert (eval_dir / "toy_hard_hard_negative_workflow_report.md").exists()
 
 

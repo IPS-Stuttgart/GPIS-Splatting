@@ -29,6 +29,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scene-dir", default=None)
     parser.add_argument("--splats-path", default=None, help="Defaults to <scene-dir>/real_splats.npz.")
     parser.add_argument("--model-path", default=None, help="Defaults to <scene-dir>/real_gpis_model.npz when GPIS gating is enabled.")
+    parser.add_argument(
+        "--gate-path",
+        default=None,
+        help="Optional external gate/confidence .npz with gate or raw_gate. Overrides GPIS model gating.",
+    )
     parser.add_argument("--output-dir", default=None, help="Defaults to <scene-dir>/renders/<method-name>.")
     parser.add_argument("--method-name", default=None)
     parser.add_argument("--split", default="test", help="Scene split to render, or all.")
@@ -55,6 +60,7 @@ def main(argv: list[str] | None = None) -> None:
         scene_dir=scene_dir,
         splats_path=args.splats_path,
         model_path=args.model_path,
+        gate_path=args.gate_path,
         output_dir=args.output_dir,
         method_name=args.method_name,
         split=args.split,

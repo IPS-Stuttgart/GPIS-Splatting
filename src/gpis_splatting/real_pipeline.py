@@ -109,6 +109,7 @@ def render_real_splats(
     scene_dir: str | Path,
     splats_path: str | Path | None = None,
     model_path: str | Path | None = None,
+    gate_path: str | Path | None = None,
     output_dir: str | Path | None = None,
     method_name: str | None = None,
     split: str = "test",
@@ -131,7 +132,9 @@ def render_real_splats(
     scene_root = Path(scene_dir)
     scene_meta, frames, splits = load_prepared_scene(scene_root)
     resolved_splats = _resolve_scene_file(scene_root, splats_path, "real_splats.npz")
-    resolved_method = method_name or ("real_gpis_gate" if use_gpis_gate else "real_splats_plain")
+    resolved_method = method_name or (
+        "real_external_gate" if gate_path is not None else ("real_gpis_gate" if use_gpis_gate else "real_splats_plain")
+    )
     resolved_output = Path(output_dir) if output_dir is not None else scene_root / "renders" / resolved_method
     resolved_output.mkdir(parents=True, exist_ok=True)
 
@@ -139,25 +142,55 @@ def render_real_splats(
     gate = torch.ones_like(splats.tau)
     raw_gate = gate
     resolved_model: Path | None = None
-    gate_path: Path | None = None
+    resolved_gate_input: Path | None = None
+    output_gate_path: Path | None = None
     gate_summary = {
         "enabled": False,
+        "source": "none",
         "epsilon": epsilon,
         "gate_floor": gate_floor,
         "min": 1.0,
         "max": 1.0,
         "mean": 1.0,
     }
-    if use_gpis_gate:
+    if gate_path is not None:
+        resolved_gate_input = _resolve_scene_file(scene_root, gate_path, "real_splat_gates.npz")
+        raw_gate_np = load_external_gate(resolved_gate_input, expected_count=int(splats.tau.shape[0]))
+        raw_gate = torch.from_numpy(raw_gate_np).to(dtype=splats.tau.dtype)
+        gate = torch.clamp(gate_floor + (1.0 - gate_floor) * raw_gate, min=0.0, max=1.0)
+        gate_np = gate.detach().cpu().numpy()
+        output_gate_path = resolved_output / "real_splat_gates.npz"
+        np.savez_compressed(
+            output_gate_path,
+            gate=gate_np,
+            raw_gate=raw_gate_np,
+            gate_floor=np.array(gate_floor),
+            splats_path=np.array(str(resolved_splats)),
+            source_gate_path=np.array(str(resolved_gate_input)),
+        )
+        gate_summary = {
+            "enabled": True,
+            "source": "external",
+            "gate_path": str(resolved_gate_input),
+            "epsilon": None,
+            "gate_floor": gate_floor,
+            "raw_min": float(raw_gate_np.min()) if raw_gate_np.size else 0.0,
+            "raw_max": float(raw_gate_np.max()) if raw_gate_np.size else 0.0,
+            "raw_mean": float(raw_gate_np.mean()) if raw_gate_np.size else 0.0,
+            "min": float(gate_np.min()) if gate_np.size else 0.0,
+            "max": float(gate_np.max()) if gate_np.size else 0.0,
+            "mean": float(gate_np.mean()) if gate_np.size else 0.0,
+        }
+    elif use_gpis_gate:
         resolved_model = _resolve_scene_file(scene_root, model_path, "real_gpis_model.npz")
         model, _ = load_model(str(resolved_model))
         raw_gate = gpis_gate_for_splats(splats, model, epsilon, batch_size=gate_batch_size)
         gate = torch.clamp(gate_floor + (1.0 - gate_floor) * raw_gate, min=0.0, max=1.0)
         raw_gate_np = raw_gate.detach().cpu().numpy()
         gate_np = gate.detach().cpu().numpy()
-        gate_path = resolved_output / "real_splat_gates.npz"
+        output_gate_path = resolved_output / "real_splat_gates.npz"
         np.savez_compressed(
-            gate_path,
+            output_gate_path,
             gate=gate_np,
             raw_gate=raw_gate_np,
             epsilon=np.array(epsilon),
@@ -167,6 +200,7 @@ def render_real_splats(
         )
         gate_summary = {
             "enabled": True,
+            "source": "gpis",
             "epsilon": epsilon,
             "gate_floor": gate_floor,
             "raw_min": float(raw_gate_np.min()) if raw_gate_np.size else 0.0,
@@ -218,8 +252,9 @@ def render_real_splats(
         "scene_dir": str(scene_root),
         "splats_path": str(resolved_splats),
         "model_path": str(resolved_model) if resolved_model is not None else None,
+        "input_gate_path": str(resolved_gate_input) if resolved_gate_input is not None else None,
         "output_dir": str(resolved_output),
-        "gate_path": str(gate_path) if gate_path is not None else None,
+        "gate_path": str(output_gate_path) if output_gate_path is not None else None,
         "use_gpis_gate": use_gpis_gate,
         "gate_summary": gate_summary,
         "gate_floor": gate_floor,
@@ -235,7 +270,7 @@ def render_real_splats(
     return {
         "output_dir": resolved_output,
         "report_path": report_path,
-        "gate_path": gate_path,
+        "gate_path": output_gate_path,
         "report": report,
     }
 
@@ -425,6 +460,19 @@ def parse_rgb_triplet(value: str) -> tuple[float, float, float]:
     if any(channel < 0.0 or channel > 1.0 for channel in rgb):
         raise ValueError("Background color channels must be in [0, 1].")
     return rgb
+
+
+def load_external_gate(path: str | Path, *, expected_count: int) -> np.ndarray:
+    with np.load(path, allow_pickle=False) as data:
+        if "gate" in data.files:
+            values = np.asarray(data["gate"], dtype=np.float64).reshape(-1)
+        elif "raw_gate" in data.files:
+            values = np.asarray(data["raw_gate"], dtype=np.float64).reshape(-1)
+        else:
+            raise ValueError(f"External gate file {path} must contain a 'gate' or 'raw_gate' array.")
+    if values.shape[0] != expected_count:
+        raise ValueError(f"External gate count {values.shape[0]} does not match splat count {expected_count}.")
+    return np.clip(values, 0.0, 1.0)
 
 
 def _resolve_scene_file(scene_root: Path, path: str | Path | None, default_name: str) -> Path:
