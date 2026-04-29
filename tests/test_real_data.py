@@ -19,6 +19,7 @@ from gpis_splatting.cli.prepare_real_scene import main as prepare_real_scene_mai
 from gpis_splatting.cli.prepare_tanks_temples_scene import main as prepare_tanks_temples_scene_main
 from gpis_splatting.cli.render_real_splats import main as render_real_splats_main
 from gpis_splatting.cli.run_real_gpis_gate_model_sweep import main as run_real_gpis_gate_model_sweep_main
+from gpis_splatting.cli.run_tanks_temples_hard_negative_calibration import main as run_tanks_temples_hard_negative_calibration_main
 from gpis_splatting.cli.run_tanks_temples_gate_sweep import main as run_tanks_temples_gate_sweep_main
 from gpis_splatting.cli.validate_real_scene import main as validate_real_scene_main
 from gpis_splatting.real_bootstrap import load_ply_point_cloud
@@ -903,6 +904,91 @@ def test_diagnose_tanks_temples_gpis_field_scores_cli(tmp_path: Path) -> None:
     assert calibration_status["best_by_threshold"]
     assert (scene_dir / "evaluations" / "toy_calibrated_calibrated_confidence.npz").exists()
     assert (scene_dir / "evaluations" / "toy_calibrated_calibration_report.md").exists()
+
+
+def test_run_tanks_temples_hard_negative_calibration_cli(tmp_path: Path) -> None:
+    source = _write_tanks_temples_fixture(tmp_path / "tanks_temples" / "Ignatius")
+    root = tmp_path / "real_scenes"
+    prepare_tanks_temples_scene_main(
+        [
+            "--input-dir",
+            str(source),
+            "--prepared-scene",
+            "ignatius_hard_negative",
+            "--output-root",
+            str(root),
+            "--train-view-count",
+            "2",
+        ]
+    )
+    scene_dir = root / "ignatius_hard_negative"
+    _write_toy_splats_and_gates(scene_dir)
+    _write_toy_real_samples(scene_dir)
+    fit_real_gpis_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--samples-path",
+            "toy_samples.npz",
+            "--output-model",
+            "toy_model.npz",
+            "--lengthscale",
+            "0.3",
+            "--noise-std",
+            "0.05",
+            "--max-train-points",
+            "0",
+        ]
+    )
+
+    run_tanks_temples_hard_negative_calibration_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--splats-path",
+            "toy_splats.npz",
+            "--model-path",
+            "toy_model.npz",
+            "--method-name",
+            "toy_hard",
+            "--max-source-splats",
+            "2",
+            "--jitter-copies",
+            "1",
+            "--ray-copies",
+            "1",
+            "--behind-copies",
+            "1",
+            "--random-count",
+            "2",
+            "--thresholds",
+            "0.05",
+            "--topk-fractions",
+            "0.5",
+            "1.0",
+            "--max-gt-points",
+            "0",
+            "--max-pred-points",
+            "0",
+            "--distance-chunk-size",
+            "2",
+        ]
+    )
+
+    eval_dir = scene_dir / "evaluations"
+    candidates = pd.read_csv(eval_dir / "toy_hard_hard_negative_candidates.csv")
+    fields = pd.read_csv(eval_dir / "toy_hard_hard_negative_gpis_field_scores.csv")
+    calibration_summary = pd.read_csv(eval_dir / "toy_hard_hard_negative_calibrated_calibration_summary.csv")
+    status = read_json(eval_dir / "toy_hard_hard_negative_workflow_status.json")
+    assert candidates.shape[0] == 10
+    assert {"source", "crop_random"}.issubset(set(candidates["candidate_type"]))
+    assert "nearest_gt_distance" in fields.columns
+    assert "average_precision" in calibration_summary.columns
+    assert status["candidate_counts"]["source"] == 2
+    assert status["best_calibrators"]
+    assert (eval_dir / "toy_hard_hard_negative_splats.npz").exists()
+    assert (eval_dir / "toy_hard_hard_negative_calibrated_calibrated_confidence.npz").exists()
+    assert (eval_dir / "toy_hard_hard_negative_workflow_report.md").exists()
 
 
 def _write_image(path: Path, *, value: int) -> None:
