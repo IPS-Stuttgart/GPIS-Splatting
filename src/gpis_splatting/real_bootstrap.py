@@ -135,7 +135,7 @@ def load_sparse_point_cloud(
     if resolved_source == "colmap":
         return load_colmap_points3d(resolved_path), resolved_source, resolved_path
     if resolved_source == "ply":
-        return load_ascii_ply_point_cloud(resolved_path), resolved_source, resolved_path
+        return load_ply_point_cloud(resolved_path), resolved_source, resolved_path
     raise ValueError(f"Unsupported resolved point source {resolved_source!r}.")
 
 
@@ -204,38 +204,78 @@ def load_colmap_points3d(path: str | Path) -> SparsePointCloud:
     )
 
 
-def load_ascii_ply_point_cloud(path: str | Path) -> SparsePointCloud:
+def load_ply_point_cloud(path: str | Path) -> SparsePointCloud:
     ply_path = Path(path)
-    lines = ply_path.read_text(encoding="utf-8").splitlines()
+    data = ply_path.read_bytes()
+    header_text, body = split_ply_header(data, ply_path)
+    header = parse_ply_header(header_text, ply_path)
+    if header["format"] == "ascii":
+        return point_cloud_from_ascii_ply_body(body, header=header, path=ply_path)
+    if header["format"] in {"binary_little_endian", "binary_big_endian"}:
+        return point_cloud_from_binary_ply_body(body, header=header, path=ply_path)
+    raise ValueError(f"{ply_path} uses unsupported PLY format {header['format']!r}.")
+
+
+def load_ascii_ply_point_cloud(path: str | Path) -> SparsePointCloud:
+    return load_ply_point_cloud(path)
+
+
+def split_ply_header(data: bytes, path: Path) -> tuple[str, bytes]:
+    for marker in (b"\nend_header\n", b"\r\nend_header\r\n", b"\rend_header\r"):
+        header_end = data.find(marker)
+        if header_end >= 0:
+            body_start = header_end + len(marker)
+            header_text = data[:body_start].decode("ascii")
+            return header_text, data[body_start:]
+    raise ValueError(f"{path} is missing a PLY end_header marker.")
+
+
+def parse_ply_header(header_text: str, path: Path) -> dict[str, Any]:
+    lines = header_text.splitlines()
     if not lines or lines[0].strip() != "ply":
-        raise ValueError(f"{ply_path} is not an ASCII PLY file.")
+        raise ValueError(f"{path} is not a PLY file.")
+    ply_format: str | None = None
     vertex_count: int | None = None
-    properties: list[str] = []
-    header_end = None
+    properties: list[tuple[str, str]] = []
     in_vertex = False
-    for line_index, line in enumerate(lines):
+    for line in lines:
         stripped = line.strip()
-        if stripped.startswith("format") and "ascii" not in stripped:
-            raise ValueError("Only ASCII PLY point clouds are supported.")
+        if not stripped or stripped.startswith("comment"):
+            continue
+        parts = stripped.split()
+        if parts[0] == "format":
+            if len(parts) < 3:
+                raise ValueError(f"{path} has a malformed PLY format line.")
+            ply_format = parts[1]
+            continue
         if stripped.startswith("element vertex"):
             vertex_count = int(stripped.split()[-1])
             in_vertex = True
             continue
         if stripped.startswith("element ") and not stripped.startswith("element vertex"):
             in_vertex = False
-        if in_vertex and stripped.startswith("property"):
-            properties.append(stripped.split()[-1])
-        if stripped == "end_header":
-            header_end = line_index + 1
-            break
-    if vertex_count is None or header_end is None:
-        raise ValueError(f"{ply_path} is missing a vertex header.")
+        if in_vertex and parts[0] == "property":
+            if len(parts) >= 2 and parts[1] == "list":
+                raise ValueError(f"{path} has an unsupported list property in the vertex element.")
+            if len(parts) != 3:
+                raise ValueError(f"{path} has a malformed vertex property line: {stripped!r}")
+            properties.append((parts[2], parts[1]))
+    if ply_format is None or vertex_count is None:
+        raise ValueError(f"{path} is missing a vertex header.")
+    return {"format": ply_format, "vertex_count": vertex_count, "properties": properties}
 
-    rows = [line.split() for line in lines[header_end : header_end + vertex_count]]
-    prop_index = {name: index for index, name in enumerate(properties)}
+
+def point_cloud_from_ascii_ply_body(body: bytes, *, header: dict[str, Any], path: Path) -> SparsePointCloud:
+    lines = body.decode("ascii").splitlines()
+    vertex_count = int(header["vertex_count"])
+    properties = list(header["properties"])
+    if len(lines) < vertex_count:
+        raise ValueError(f"{path} has fewer vertex rows than declared.")
+    rows = [line.split() for line in lines[:vertex_count]]
+    prop_index = {name: index for index, (name, _property_type) in enumerate(properties)}
     for required in ("x", "y", "z"):
         if required not in prop_index:
-            raise ValueError(f"{ply_path} is missing vertex property {required!r}.")
+            raise ValueError(f"{path} is missing vertex property {required!r}.")
     points = np.asarray([[float(row[prop_index["x"]]), float(row[prop_index["y"]]), float(row[prop_index["z"]])] for row in rows], dtype=np.float64)
     if {"red", "green", "blue"}.issubset(prop_index):
         colors = np.asarray([[float(row[prop_index["red"]]), float(row[prop_index["green"]]), float(row[prop_index["blue"]])] for row in rows], dtype=np.float64)
@@ -243,6 +283,55 @@ def load_ascii_ply_point_cloud(path: str | Path) -> SparsePointCloud:
     else:
         colors = np.full((points.shape[0], 3), 0.7, dtype=np.float64)
     return SparsePointCloud(points=points, colors=colors)
+
+
+def point_cloud_from_binary_ply_body(body: bytes, *, header: dict[str, Any], path: Path) -> SparsePointCloud:
+    vertex_count = int(header["vertex_count"])
+    properties = list(header["properties"])
+    endian = "<" if header["format"] == "binary_little_endian" else ">"
+    dtype = binary_ply_vertex_dtype(properties, endian=endian, path=path)
+    expected_bytes = vertex_count * dtype.itemsize
+    if len(body) < expected_bytes:
+        raise ValueError(f"{path} has fewer binary vertex bytes than declared.")
+    vertices = np.frombuffer(body[:expected_bytes], dtype=dtype, count=vertex_count)
+    for required in ("x", "y", "z"):
+        if required not in vertices.dtype.names:
+            raise ValueError(f"{path} is missing vertex property {required!r}.")
+    points = np.stack([vertices["x"], vertices["y"], vertices["z"]], axis=1).astype(np.float64)
+    names = set(vertices.dtype.names or ())
+    if {"red", "green", "blue"}.issubset(names):
+        colors = np.stack([vertices["red"], vertices["green"], vertices["blue"]], axis=1).astype(np.float64)
+        colors = np.clip(colors / 255.0, 0.0, 1.0)
+    else:
+        colors = np.full((points.shape[0], 3), 0.7, dtype=np.float64)
+    return SparsePointCloud(points=points, colors=colors)
+
+
+def binary_ply_vertex_dtype(properties: list[tuple[str, str]], *, endian: str, path: Path) -> np.dtype:
+    scalar_types = {
+        "char": "i1",
+        "int8": "i1",
+        "uchar": "u1",
+        "uint8": "u1",
+        "short": f"{endian}i2",
+        "int16": f"{endian}i2",
+        "ushort": f"{endian}u2",
+        "uint16": f"{endian}u2",
+        "int": f"{endian}i4",
+        "int32": f"{endian}i4",
+        "uint": f"{endian}u4",
+        "uint32": f"{endian}u4",
+        "float": f"{endian}f4",
+        "float32": f"{endian}f4",
+        "double": f"{endian}f8",
+        "float64": f"{endian}f8",
+    }
+    dtype_fields = []
+    for name, property_type in properties:
+        if property_type not in scalar_types:
+            raise ValueError(f"{path} has unsupported PLY scalar type {property_type!r}.")
+        dtype_fields.append((name, scalar_types[property_type]))
+    return np.dtype(dtype_fields)
 
 
 def subsample_point_cloud(cloud: SparsePointCloud, *, max_points: int | None, seed: int) -> SparsePointCloud:
