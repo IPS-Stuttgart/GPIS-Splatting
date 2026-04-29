@@ -7,6 +7,7 @@ import pandas as pd
 from PIL import Image
 
 from gpis_splatting.cli.bootstrap_real_gpis import main as bootstrap_real_gpis_main
+from gpis_splatting.cli.diagnose_real_render import main as diagnose_real_render_main
 from gpis_splatting.cli.evaluate_real_renders import main as evaluate_real_renders_main
 from gpis_splatting.cli.fit_real_gpis import main as fit_real_gpis_main
 from gpis_splatting.cli.prepare_real_scene import main as prepare_real_scene_main
@@ -324,6 +325,74 @@ def test_real_gpis_fit_render_and_evaluate_loop(tmp_path: Path) -> None:
     metrics = pd.read_csv(scene_dir / "evaluations" / "real_gpis_gate_train_image_metrics.csv")
     assert len(metrics) == 1
     assert np.isfinite(metrics["ssim"]).all()
+
+
+def test_real_render_diagnostics_outputs_visuals_and_metrics(tmp_path: Path) -> None:
+    root = _prepare_colmap_scene_with_points(tmp_path)
+    scene_dir = root / "colmap_bootstrap"
+
+    bootstrap_real_gpis_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--point-source",
+            "colmap",
+            "--free-space-samples-per-point",
+            "1",
+            "--add-behind-surface-samples",
+            "false",
+            "--max-points",
+            "10",
+        ]
+    )
+    fit_real_gpis_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--max-train-points",
+            "6",
+            "--lengthscale",
+            "0.5",
+            "--noise-std",
+            "0.05",
+        ]
+    )
+    diagnose_real_render_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--split",
+            "train",
+            "--max-frames",
+            "1",
+            "--epsilon",
+            "0.2",
+            "--gate-floor",
+            "0.25",
+        ]
+    )
+
+    diagnostics_dir = scene_dir / "diagnostics" / "real_render"
+    frame_metrics = pd.read_csv(diagnostics_dir / "real_render_diagnostics.csv")
+    status = read_json(diagnostics_dir / "real_render_diagnostics.json")
+    assert len(frame_metrics) == 1
+    row = frame_metrics.iloc[0]
+    assert row["projected_splat_count"] > 0
+    assert row["in_frame_splat_count"] > 0
+    assert row["visible_splat_count"] == row["in_frame_splat_count"]
+    assert row["plain_drawn_splat_count"] > 0
+    assert np.isfinite(row["plain_psnr"])
+    assert np.isfinite(row["gated_ssim"])
+    assert row["gate_min"] >= 0.25
+    assert (diagnostics_dir / "gate_histogram.png").exists()
+    assert Path(row["target_plain_gated_panel"]).exists()
+    assert Path(row["projected_splat_overlay"]).exists()
+    assert Path(row["depth_visualization"]).exists()
+    assert Path(row["gate_overlay"]).exists()
+    assert Path(row["gate_heatmap"]).exists()
+    assert Path(row["gate_histogram"]).exists()
+    assert status["metric_summary"]["frame_count"] == 1
+    assert (diagnostics_dir / "real_render_diagnostics.md").exists()
 
 
 def _write_image(path: Path, *, value: int) -> None:

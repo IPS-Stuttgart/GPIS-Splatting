@@ -170,6 +170,21 @@ run_real_evaluation `
 This writes `real_evaluation_comparison.csv`, `real_evaluation_status.json`, and `real_evaluation_report.md` under
 `real_scenes/<scene>/evaluations/`.
 
+Diagnose why a real-data run is failing before starting another sweep:
+
+```powershell
+diagnose_real_render `
+  --scene poster8_smoke `
+  --split test `
+  --max-frames 8 `
+  --epsilon 0.24 `
+  --gate-floor 0.0
+```
+
+This writes target/plain/gated panels, projected-splat overlays, depth visualizations, gate-colored overlays, gate histograms,
+`real_render_diagnostics.csv`, and `real_render_diagnostics.md` under `real_scenes/<scene>/diagnostics/real_render/`.
+Existing render directories can be passed with `--plain-renders-dir` and `--gated-renders-dir` to diagnose already-generated outputs.
+
 ## Development
 
 Install the local package and development tools:
@@ -204,6 +219,7 @@ python -m build
 - Real-scene GPIS bootstrap from COLMAP `points3D.txt` or ASCII PLY point clouds into pseudo-SDF observations and initial splats
 - Dense real-scene GPIS fitting plus camera-aware real-splat rendering with optional GPIS optical-thickness gates
 - Reproducible real-data evaluation workflow with plain/gated comparisons, epsilon, splat scale, and gate-floor sweeps
+- Real-render diagnostics with target/plain/gated panels, projected splats, depth views, gate overlays, histograms, and per-frame visibility/metric CSVs
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
 - Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.
