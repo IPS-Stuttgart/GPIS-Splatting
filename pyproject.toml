@@ -38,6 +38,7 @@ evaluate_tanks_temples_geometry = "gpis_splatting.cli.evaluate_tanks_temples_geo
 run_tanks_temples_gate_sweep = "gpis_splatting.cli.run_tanks_temples_gate_sweep:main"
 diagnose_tanks_temples_gates = "gpis_splatting.cli.diagnose_tanks_temples_gates:main"
 run_real_gpis_gate_model_sweep = "gpis_splatting.cli.run_real_gpis_gate_model_sweep:main"
+diagnose_tanks_temples_gpis_field_scores = "gpis_splatting.cli.diagnose_tanks_temples_gpis_field_scores:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

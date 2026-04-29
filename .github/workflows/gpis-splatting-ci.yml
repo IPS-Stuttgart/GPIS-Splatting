@@ -199,6 +199,7 @@ jobs:
           run_tanks_temples_gate_sweep --help > /dev/null
           diagnose_tanks_temples_gates --help > /dev/null
           run_real_gpis_gate_model_sweep --help > /dev/null
+          diagnose_tanks_temples_gpis_field_scores --help > /dev/null
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v7
