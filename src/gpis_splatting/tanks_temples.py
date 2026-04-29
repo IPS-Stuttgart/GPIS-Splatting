@@ -7,6 +7,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -285,10 +286,19 @@ def download_google_drive_url(url: str, destination: Path) -> None:
         response.close()
         request = urllib.request.Request(add_query_parameter(url, "confirm", token), headers={"User-Agent": "gpis-splatting/0.1"})
         response = opener.open(request)
-    with response, destination.open("wb") as handle:
-        shutil.copyfileobj(response, handle)
+    write_response_to_path(response, destination)
+    if looks_like_html(destination):
+        confirm_url = google_drive_confirm_url_from_html(destination.read_text(encoding="utf-8", errors="ignore"), base_url=url)
+        if confirm_url is not None:
+            request = urllib.request.Request(confirm_url, headers={"User-Agent": "gpis-splatting/0.1"})
+            write_response_to_path(opener.open(request), destination)
     if looks_like_html(destination):
         raise ValueError(f"Downloaded HTML instead of data for {url}. This usually means Google Drive requires browser confirmation.")
+
+
+def write_response_to_path(response: Any, destination: Path) -> None:
+    with response, destination.open("wb") as handle:
+        shutil.copyfileobj(response, handle)
 
 
 def google_drive_confirm_token(cookie_jar: http.cookiejar.CookieJar) -> str | None:
@@ -296,6 +306,55 @@ def google_drive_confirm_token(cookie_jar: http.cookiejar.CookieJar) -> str | No
         if cookie.name.startswith("download_warning"):
             return cookie.value
     return None
+
+
+def google_drive_confirm_url_from_html(html: str, *, base_url: str) -> str | None:
+    parser = GoogleDriveConfirmParser()
+    parser.feed(html)
+    for action, inputs in parser.forms:
+        if "confirm" not in inputs:
+            continue
+        confirm_url = urllib.parse.urljoin(base_url, action or base_url)
+        parsed = urllib.parse.urlparse(confirm_url)
+        query = urllib.parse.parse_qs(parsed.query)
+        for key, value in inputs.items():
+            query[key] = [value]
+        return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(query, doseq=True)))
+
+    match = re.search(r"[?&]confirm=([0-9A-Za-z_-]+)", html)
+    if match is None:
+        match = re.search(r"name=[\"']confirm[\"'][^>]+value=[\"']([^\"']+)[\"']", html)
+    if match is None:
+        return None
+    return add_query_parameter(base_url, "confirm", match.group(1))
+
+
+class GoogleDriveConfirmParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.forms: list[tuple[str | None, dict[str, str]]] = []
+        self._action: str | None = None
+        self._inputs: dict[str, str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "form":
+            attrs_dict = {key: value for key, value in attrs}
+            self._action = attrs_dict.get("action")
+            self._inputs = {}
+            return
+        if tag != "input" or self._inputs is None:
+            return
+        attrs_dict = {key: value for key, value in attrs}
+        name = attrs_dict.get("name")
+        value = attrs_dict.get("value")
+        if name is not None and value is not None:
+            self._inputs[name] = value
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "form" and self._inputs is not None:
+            self.forms.append((self._action, self._inputs))
+            self._action = None
+            self._inputs = None
 
 
 def add_query_parameter(url: str, key: str, value: str) -> str:

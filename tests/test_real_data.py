@@ -14,9 +14,10 @@ from gpis_splatting.cli.prepare_real_scene import main as prepare_real_scene_mai
 from gpis_splatting.cli.prepare_tanks_temples_scene import main as prepare_tanks_temples_scene_main
 from gpis_splatting.cli.render_real_splats import main as render_real_splats_main
 from gpis_splatting.cli.validate_real_scene import main as validate_real_scene_main
+from gpis_splatting.real_bootstrap import load_ply_point_cloud
 from gpis_splatting.real_scene import build_sparse_split
 from gpis_splatting.serialization import read_json, write_json
-from gpis_splatting.tanks_temples import read_tanks_temples_log
+from gpis_splatting.tanks_temples import google_drive_confirm_url_from_html, read_tanks_temples_log
 
 
 def test_prepare_validate_and_evaluate_transforms_scene(tmp_path: Path) -> None:
@@ -261,6 +262,47 @@ def test_bootstrap_real_gpis_from_ply_points(tmp_path: Path) -> None:
     assert np.allclose(splats["colors"][0], [10 / 255.0, 20 / 255.0, 30 / 255.0])
 
 
+def test_load_binary_little_endian_ply_point_cloud(tmp_path: Path) -> None:
+    ply_path = tmp_path / "binary_points.ply"
+    vertices = np.asarray(
+        [
+            (0.0, 0.1, 1.0, 10, 20, 30),
+            (0.2, 0.3, 1.2, 40, 50, 60),
+        ],
+        dtype=[
+            ("x", "<f4"),
+            ("y", "<f4"),
+            ("z", "<f4"),
+            ("red", "u1"),
+            ("green", "u1"),
+            ("blue", "u1"),
+        ],
+    )
+    ply_path.write_bytes(
+        "\n".join(
+            [
+                "ply",
+                "format binary_little_endian 1.0",
+                "element vertex 2",
+                "property float x",
+                "property float y",
+                "property float z",
+                "property uchar red",
+                "property uchar green",
+                "property uchar blue",
+                "end_header",
+            ]
+        ).encode("ascii")
+        + b"\n"
+        + vertices.tobytes()
+    )
+
+    cloud = load_ply_point_cloud(ply_path)
+    assert cloud.points.shape == (2, 3)
+    assert np.allclose(cloud.points[1], [0.2, 0.3, 1.2])
+    assert np.allclose(cloud.colors[0], [10 / 255.0, 20 / 255.0, 30 / 255.0])
+
+
 def test_real_gpis_fit_render_and_evaluate_loop(tmp_path: Path) -> None:
     root = _prepare_colmap_scene_with_points(tmp_path)
     scene_dir = root / "colmap_bootstrap"
@@ -447,6 +489,28 @@ def test_read_tanks_temples_log_rejects_incomplete_pose(tmp_path: Path) -> None:
         assert "five lines per pose" in str(exc)
     else:
         raise AssertionError("Expected malformed Tanks and Temples log to fail.")
+
+
+def test_google_drive_confirm_url_from_html_form() -> None:
+    html = """
+    <html>
+      <body>
+        <form id="download-form" action="https://drive.usercontent.google.com/download" method="get">
+          <input type="hidden" name="id" value="abc123">
+          <input type="hidden" name="export" value="download">
+          <input type="hidden" name="confirm" value="t">
+          <input type="hidden" name="uuid" value="uuid-123">
+        </form>
+      </body>
+    </html>
+    """
+
+    confirm_url = google_drive_confirm_url_from_html(html, base_url="https://drive.google.com/uc?export=download&id=abc123")
+    assert confirm_url is not None
+    assert confirm_url.startswith("https://drive.usercontent.google.com/download?")
+    assert "id=abc123" in confirm_url
+    assert "confirm=t" in confirm_url
+    assert "uuid=uuid-123" in confirm_url
 
 
 def _write_image(path: Path, *, value: int) -> None:
