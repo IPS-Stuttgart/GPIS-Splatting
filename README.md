@@ -122,7 +122,7 @@ bootstrap_real_gpis `
   --max-points 5000
 ```
 
-The bootstrapper reads COLMAP `points3D.txt` or an ASCII `.ply` point cloud. It writes `real_samples.npz` with surface, free-space,
+The bootstrapper reads COLMAP `points3D.txt` or an ASCII/binary `.ply` point cloud. It writes `real_samples.npz` with surface, free-space,
 and optional behind-surface pseudo-SDF observations, `real_splats.npz` with initial colored splats, plus `real_gpis_config.json`
 and `real_bootstrap_report.json`.
 
@@ -203,6 +203,19 @@ The downloader records official Tanks and Temples provenance and license URLs. T
 uses the dataset's recommended pinhole initialization (`fx=fy=0.7*W`, `cx=W/2`, `cy=H/2`), stores paths to the COLMAP reconstruction,
 alignment, crop, and ground-truth geometry when present, and writes the normalized `real_scene.json`, `cameras.json`, and `splits.json`.
 
+Evaluate initialized splat geometry against the official Tanks and Temples ground truth:
+
+```powershell
+evaluate_tanks_temples_geometry `
+  --scene ignatius_tnt64 `
+  --splats-path real20k_sigma_0p04_splats.npz `
+  --thresholds 0.01 0.02 0.05 0.1
+```
+
+The evaluator applies the stored alignment and crop metadata by default, uses deterministic point subsampling for large PLYs, and writes
+Chamfer, accuracy/completion, precision, recall, and F-score tables under `real_scenes/<scene>/evaluations/`. Passing `--gate-path` or
+`--model-path` also adds high-gate/low-gate geometry slices.
+
 ## Development
 
 Install the local package and development tools:
@@ -239,6 +252,7 @@ python -m build
 - Reproducible real-data evaluation workflow with plain/gated comparisons, epsilon, splat scale, and gate-floor sweeps
 - Real-render diagnostics with target/plain/gated panels, projected splats, depth views, gate overlays, histograms, and per-frame visibility/metric CSVs
 - Tanks and Temples `Ignatius` downloader and `.log` pose adapter for geometry-oriented real-data experiments
+- Tanks and Temples geometry evaluator with alignment/crop handling, Chamfer, precision, recall, F-score, and gate-stratified slices
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
 - Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.

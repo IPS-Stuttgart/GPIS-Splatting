@@ -4,19 +4,23 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import torch
 from PIL import Image
 
 from gpis_splatting.cli.bootstrap_real_gpis import main as bootstrap_real_gpis_main
 from gpis_splatting.cli.diagnose_real_render import main as diagnose_real_render_main
 from gpis_splatting.cli.evaluate_real_renders import main as evaluate_real_renders_main
+from gpis_splatting.cli.evaluate_tanks_temples_geometry import main as evaluate_tanks_temples_geometry_main
 from gpis_splatting.cli.fit_real_gpis import main as fit_real_gpis_main
 from gpis_splatting.cli.prepare_real_scene import main as prepare_real_scene_main
 from gpis_splatting.cli.prepare_tanks_temples_scene import main as prepare_tanks_temples_scene_main
 from gpis_splatting.cli.render_real_splats import main as render_real_splats_main
 from gpis_splatting.cli.validate_real_scene import main as validate_real_scene_main
 from gpis_splatting.real_bootstrap import load_ply_point_cloud
+from gpis_splatting.real_geometry import crop_mask, evaluate_geometry_group
 from gpis_splatting.real_scene import build_sparse_split
 from gpis_splatting.serialization import read_json, write_json
+from gpis_splatting.splats import SplatCloud, save_splats
 from gpis_splatting.tanks_temples import google_drive_confirm_url_from_html, read_tanks_temples_log
 
 
@@ -511,6 +515,83 @@ def test_google_drive_confirm_url_from_html_form() -> None:
     assert "id=abc123" in confirm_url
     assert "confirm=t" in confirm_url
     assert "uuid=uuid-123" in confirm_url
+
+
+def test_geometry_metrics_and_crop_mask() -> None:
+    pred = np.asarray([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float64)
+    gt = np.asarray([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0]], dtype=np.float64)
+
+    summary, thresholds = evaluate_geometry_group(pred, gt, thresholds=(0.05, 0.2), distance_chunk_size=2)
+    assert summary["accuracy_mean"] == 0.3
+    assert summary["completion_mean"] == 0.0
+    assert thresholds[0]["precision"] == 2 / 3
+    assert thresholds[0]["recall"] == 1.0
+    assert thresholds[1]["f_score"] == 0.8
+
+    crop = {"min": [-0.01, -0.01, -0.01], "max": [0.2, 0.2, 0.2]}
+    assert crop_mask(pred, crop).tolist() == [True, True, False]
+
+
+def test_evaluate_tanks_temples_geometry_cli(tmp_path: Path) -> None:
+    source = _write_tanks_temples_fixture(tmp_path / "tanks_temples" / "Ignatius")
+    root = tmp_path / "real_scenes"
+    prepare_tanks_temples_scene_main(
+        [
+            "--input-dir",
+            str(source),
+            "--prepared-scene",
+            "ignatius_geometry",
+            "--output-root",
+            str(root),
+            "--train-view-count",
+            "2",
+        ]
+    )
+    scene_dir = root / "ignatius_geometry"
+    splats = SplatCloud(
+        centers=torch.asarray([[0.0, 0.0, 1.0], [0.1, 0.0, 1.0], [0.8, 0.8, 0.0]], dtype=torch.float64),
+        colors=torch.ones((3, 3), dtype=torch.float64),
+        tau=torch.ones((3,), dtype=torch.float64),
+        sigma=torch.full((3,), 0.04, dtype=torch.float64),
+        is_surface=torch.ones((3,), dtype=torch.bool),
+    )
+    save_splats(str(scene_dir / "toy_splats.npz"), splats)
+    np.savez_compressed(scene_dir / "toy_gates.npz", gate=np.asarray([0.9, 0.8, 0.1], dtype=np.float64))
+
+    evaluate_tanks_temples_geometry_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--splats-path",
+            "toy_splats.npz",
+            "--gate-path",
+            "toy_gates.npz",
+            "--method-name",
+            "toy",
+            "--thresholds",
+            "0.05",
+            "0.2",
+            "--max-gt-points",
+            "0",
+            "--max-pred-points",
+            "0",
+            "--distance-chunk-size",
+            "2",
+        ]
+    )
+
+    summary = pd.read_csv(scene_dir / "evaluations" / "toy_geometry_summary.csv")
+    thresholds = pd.read_csv(scene_dir / "evaluations" / "toy_geometry_thresholds.csv")
+    status = read_json(scene_dir / "evaluations" / "toy_geometry_status.json")
+    assert set(summary["group"]) == {"all", "gate_ge_0p5", "gate_lt_0p5"}
+    all_005 = thresholds[(thresholds["group"] == "all") & (thresholds["threshold"] == 0.05)].iloc[0]
+    high_005 = thresholds[(thresholds["group"] == "gate_ge_0p5") & (thresholds["threshold"] == 0.05)].iloc[0]
+    assert all_005["precision"] == 2 / 3
+    assert all_005["recall"] == 1.0
+    assert high_005["f_score"] == 1.0
+    assert status["alignment_applied"] is True
+    assert status["crop"]["enabled"] is True
+    assert (scene_dir / "evaluations" / "toy_geometry_report.md").exists()
 
 
 def _write_image(path: Path, *, value: int) -> None:
