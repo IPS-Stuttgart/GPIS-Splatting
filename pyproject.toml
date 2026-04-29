@@ -31,6 +31,7 @@ bootstrap_real_gpis = "gpis_splatting.cli.bootstrap_real_gpis:main"
 fit_real_gpis = "gpis_splatting.cli.fit_real_gpis:main"
 render_real_splats = "gpis_splatting.cli.render_real_splats:main"
 run_real_evaluation = "gpis_splatting.cli.run_real_evaluation:main"
+diagnose_real_render = "gpis_splatting.cli.diagnose_real_render:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -111,5 +111,5 @@ def save_image(path: str | Path, image: Tensor) -> None:
 
 
 def load_image(path: str | Path) -> np.ndarray:
-    return np.asarray(Image.open(path).convert("RGB"), dtype=np.float64) / 255.0
-
+    with Image.open(path) as image:
+        return np.asarray(image.convert("RGB"), dtype=np.float64) / 255.0
