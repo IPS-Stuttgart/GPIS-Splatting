@@ -244,6 +244,25 @@ diagnose_tanks_temples_gates `
 This writes per-splat nearest-ground-truth distances, Spearman/Pearson gate-error correlations, gate-sorted retention curves,
 and calibration-style gate bins under `real_scenes/<scene>/evaluations/`.
 
+Sweep GPIS pseudo-SDF construction and model hyperparameters against those gate-quality diagnostics:
+
+```powershell
+run_real_gpis_gate_model_sweep `
+  --scene ignatius_tnt64 `
+  --sweep-name ignatius_gate_model_v1 `
+  --construction-modes surface_free strong_free behind_surface normal_offsets `
+  --lengthscales 0.15 0.25 0.4 `
+  --noise-stds 0.03 0.06 `
+  --epsilons 0.08 0.16 0.24 `
+  --gate-floors 0.0 0.25 `
+  --max-bootstrap-points 5000 `
+  --max-train-points 1200
+```
+
+This regenerates bootstrap samples for each construction mode, fits a GPIS model for every hyperparameter combination, runs the
+gate-quality diagnostic for every gate setting, and writes a summary CSV/status/report under `real_scenes/<scene>/model_sweeps/<sweep-name>/`.
+Use `--construction-modes existing --samples-path ... --splats-path ...` for a fast sweep over already-created samples and splats.
+
 ## Development
 
 Install the local package and development tools:
@@ -283,6 +302,7 @@ python -m build
 - Tanks and Temples geometry evaluator with alignment/crop handling, Chamfer, precision, recall, F-score, and gate-stratified slices
 - Gate-threshold geometry sweeps for checking whether GPIS confidence is useful for selecting splats
 - Gate quality diagnostics for checking whether GPIS confidence ranks and calibrates splat geometry error
+- Real GPIS gate model sweeps over pseudo-SDF construction modes, GPIS hyperparameters, epsilon, and gate floors
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
 - Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.

@@ -16,6 +16,7 @@ from gpis_splatting.cli.fit_real_gpis import main as fit_real_gpis_main
 from gpis_splatting.cli.prepare_real_scene import main as prepare_real_scene_main
 from gpis_splatting.cli.prepare_tanks_temples_scene import main as prepare_tanks_temples_scene_main
 from gpis_splatting.cli.render_real_splats import main as render_real_splats_main
+from gpis_splatting.cli.run_real_gpis_gate_model_sweep import main as run_real_gpis_gate_model_sweep_main
 from gpis_splatting.cli.run_tanks_temples_gate_sweep import main as run_tanks_temples_gate_sweep_main
 from gpis_splatting.cli.validate_real_scene import main as validate_real_scene_main
 from gpis_splatting.real_bootstrap import load_ply_point_cloud
@@ -718,6 +719,76 @@ def test_diagnose_tanks_temples_gates_cli(tmp_path: Path) -> None:
     assert (scene_dir / "evaluations" / "toy_gate_quality_report.md").exists()
 
 
+def test_run_real_gpis_gate_model_sweep_existing_cli(tmp_path: Path) -> None:
+    source = _write_tanks_temples_fixture(tmp_path / "tanks_temples" / "Ignatius")
+    root = tmp_path / "real_scenes"
+    prepare_tanks_temples_scene_main(
+        [
+            "--input-dir",
+            str(source),
+            "--prepared-scene",
+            "ignatius_model_sweep",
+            "--output-root",
+            str(root),
+            "--train-view-count",
+            "2",
+        ]
+    )
+    scene_dir = root / "ignatius_model_sweep"
+    _write_toy_splats_and_gates(scene_dir)
+    _write_toy_real_samples(scene_dir)
+
+    run_real_gpis_gate_model_sweep_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--sweep-name",
+            "toy_model_sweep",
+            "--construction-modes",
+            "existing",
+            "--samples-path",
+            "toy_samples.npz",
+            "--splats-path",
+            "toy_splats.npz",
+            "--lengthscales",
+            "0.3",
+            "--noise-stds",
+            "0.05",
+            "--epsilons",
+            "0.12",
+            "--gate-floors",
+            "0.0",
+            "--thresholds",
+            "0.05",
+            "--topk-fractions",
+            "0.34",
+            "1.0",
+            "--num-bins",
+            "2",
+            "--max-train-points",
+            "0",
+            "--max-gt-points",
+            "0",
+            "--max-pred-points",
+            "0",
+            "--distance-chunk-size",
+            "2",
+        ]
+    )
+
+    sweep_dir = scene_dir / "model_sweeps" / "toy_model_sweep"
+    summary = pd.read_csv(sweep_dir / "toy_model_sweep_summary.csv")
+    status = read_json(sweep_dir / "toy_model_sweep_status.json")
+    assert summary.shape[0] == 1
+    row = summary.iloc[0]
+    assert row["construction_mode"] == "existing"
+    assert np.isclose(row["geometry_threshold"], 0.05)
+    assert row["train_sample_count"] == 6
+    assert status["failure_count"] == 0
+    assert status["best_by_gate_error_spearman"][0]["construction_mode"] == "existing"
+    assert (sweep_dir / "toy_model_sweep_report.md").exists()
+
+
 def _write_image(path: Path, *, value: int) -> None:
     data = np.full((6, 8, 3), value, dtype=np.uint8)
     Image.fromarray(data, mode="RGB").save(path)
@@ -848,6 +919,31 @@ def _write_toy_splats_and_gates(scene_dir: Path) -> None:
     )
     save_splats(str(scene_dir / "toy_splats.npz"), splats)
     np.savez_compressed(scene_dir / "toy_gates.npz", gate=np.asarray([0.9, 0.8, 0.1], dtype=np.float64))
+
+
+def _write_toy_real_samples(scene_dir: Path) -> None:
+    points = np.asarray(
+        [
+            [0.0, 0.0, 1.0],
+            [0.1, 0.0, 1.0],
+            [0.0, 0.0, 0.75],
+            [0.1, 0.0, 0.75],
+            [0.0, 0.0, 1.25],
+            [0.1, 0.0, 1.25],
+        ],
+        dtype=np.float64,
+    )
+    np.savez_compressed(
+        scene_dir / "toy_samples.npz",
+        points=points,
+        sdf=np.asarray([0.0, 0.0, 0.25, 0.25, -0.25, -0.25], dtype=np.float64),
+        observation_noise_std=np.full((6,), 0.03, dtype=np.float64),
+        sample_type=np.asarray([0, 0, 1, 1, 2, 2], dtype=np.int64),
+        source_point_index=np.asarray([0, 1, 0, 1, 0, 1], dtype=np.int64),
+        camera_index=np.zeros((6,), dtype=np.int64),
+        ray_distance=np.ones((6,), dtype=np.float64),
+        sample_type_names=np.asarray(["surface", "free_space", "behind_surface"]),
+    )
 
 
 def _tiny_ascii_ply() -> str:
