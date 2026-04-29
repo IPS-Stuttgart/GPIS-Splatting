@@ -15,6 +15,7 @@ from gpis_splatting.cli.fit_real_gpis import main as fit_real_gpis_main
 from gpis_splatting.cli.prepare_real_scene import main as prepare_real_scene_main
 from gpis_splatting.cli.prepare_tanks_temples_scene import main as prepare_tanks_temples_scene_main
 from gpis_splatting.cli.render_real_splats import main as render_real_splats_main
+from gpis_splatting.cli.run_tanks_temples_gate_sweep import main as run_tanks_temples_gate_sweep_main
 from gpis_splatting.cli.validate_real_scene import main as validate_real_scene_main
 from gpis_splatting.real_bootstrap import load_ply_point_cloud
 from gpis_splatting.real_geometry import crop_mask, evaluate_geometry_group
@@ -594,6 +595,62 @@ def test_evaluate_tanks_temples_geometry_cli(tmp_path: Path) -> None:
     assert (scene_dir / "evaluations" / "toy_geometry_report.md").exists()
 
 
+def test_run_tanks_temples_gate_sweep_cli(tmp_path: Path) -> None:
+    source = _write_tanks_temples_fixture(tmp_path / "tanks_temples" / "Ignatius")
+    root = tmp_path / "real_scenes"
+    prepare_tanks_temples_scene_main(
+        [
+            "--input-dir",
+            str(source),
+            "--prepared-scene",
+            "ignatius_gate_sweep",
+            "--output-root",
+            str(root),
+            "--train-view-count",
+            "2",
+        ]
+    )
+    scene_dir = root / "ignatius_gate_sweep"
+    _write_toy_splats_and_gates(scene_dir)
+
+    run_tanks_temples_gate_sweep_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--splats-path",
+            "toy_splats.npz",
+            "--gate-path",
+            "toy_gates.npz",
+            "--method-name",
+            "toy_sweep",
+            "--thresholds",
+            "0.05",
+            "--gate-thresholds",
+            "0.5",
+            "0.85",
+            "--max-gt-points",
+            "0",
+            "--max-pred-points",
+            "0",
+            "--distance-chunk-size",
+            "2",
+        ]
+    )
+
+    sweep = pd.read_csv(scene_dir / "evaluations" / "toy_sweep_gate_sweep.csv")
+    status = read_json(scene_dir / "evaluations" / "toy_sweep_gate_sweep_status.json")
+    baseline = sweep[sweep["selection"] == "all"].iloc[0]
+    gate_05 = sweep[sweep["gate_threshold"] == 0.5].iloc[0]
+    gate_085 = sweep[sweep["gate_threshold"] == 0.85].iloc[0]
+    assert np.isclose(baseline["f_score"], 0.8)
+    assert np.isclose(gate_05["f_score"], 1.0)
+    assert np.isclose(gate_05["retention_fraction"], 2 / 3)
+    assert np.isclose(gate_05["delta_f_score_vs_all"], 0.2)
+    assert np.isclose(gate_085["retention_fraction"], 1 / 3)
+    assert status["best_by_f_score"][0]["gate_threshold"] == 0.5
+    assert (scene_dir / "evaluations" / "toy_sweep_gate_sweep_report.md").exists()
+
+
 def _write_image(path: Path, *, value: int) -> None:
     data = np.full((6, 8, 3), value, dtype=np.uint8)
     Image.fromarray(data, mode="RGB").save(path)
@@ -712,6 +769,18 @@ def _write_tanks_temples_fixture(root: Path) -> Path:
         target_dir.mkdir()
         (target_dir / f"Ignatius{suffix}").write_text(content, encoding="utf-8")
     return root
+
+
+def _write_toy_splats_and_gates(scene_dir: Path) -> None:
+    splats = SplatCloud(
+        centers=torch.asarray([[0.0, 0.0, 1.0], [0.1, 0.0, 1.0], [0.8, 0.8, 0.0]], dtype=torch.float64),
+        colors=torch.ones((3, 3), dtype=torch.float64),
+        tau=torch.ones((3,), dtype=torch.float64),
+        sigma=torch.full((3,), 0.04, dtype=torch.float64),
+        is_surface=torch.ones((3,), dtype=torch.bool),
+    )
+    save_splats(str(scene_dir / "toy_splats.npz"), splats)
+    np.savez_compressed(scene_dir / "toy_gates.npz", gate=np.asarray([0.9, 0.8, 0.1], dtype=np.float64))
 
 
 def _tiny_ascii_ply() -> str:

@@ -216,6 +216,20 @@ The evaluator applies the stored alignment and crop metadata by default, uses de
 Chamfer, accuracy/completion, precision, recall, and F-score tables under `real_scenes/<scene>/evaluations/`. Passing `--gate-path` or
 `--model-path` also adds high-gate/low-gate geometry slices.
 
+Run a focused gate-threshold sweep to test whether GPIS confidence selects geometrically better splats:
+
+```powershell
+run_tanks_temples_gate_sweep `
+  --scene ignatius_tnt64 `
+  --splats-path real20k_sigma_0p04_splats.npz `
+  --model-path real20k_sigma_0p04_gpis_model.npz `
+  --thresholds 0.02 0.05 0.1 `
+  --gate-thresholds 0.02 0.05 0.1 0.2 0.35 0.5
+```
+
+This reuses one geometry evaluation, then writes a compact `*_gate_sweep.csv` and report with retention, precision, recall, F-score,
+Chamfer, and deltas versus the ungated splat set for every `gate >= threshold` subset.
+
 ## Development
 
 Install the local package and development tools:
@@ -253,6 +267,7 @@ python -m build
 - Real-render diagnostics with target/plain/gated panels, projected splats, depth views, gate overlays, histograms, and per-frame visibility/metric CSVs
 - Tanks and Temples `Ignatius` downloader and `.log` pose adapter for geometry-oriented real-data experiments
 - Tanks and Temples geometry evaluator with alignment/crop handling, Chamfer, precision, recall, F-score, and gate-stratified slices
+- Gate-threshold geometry sweeps for checking whether GPIS confidence is useful for selecting splats
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
 - Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.
