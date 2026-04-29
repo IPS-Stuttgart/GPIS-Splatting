@@ -258,6 +258,19 @@ diagnose_tanks_temples_gpis_field_scores `
 This evaluates GPIS posterior mean, variance, gradient norm, signed-distance proxy, distance uncertainty, the current gate,
 and alternative distance/uncertainty scores at every splat center, then ranks those scores against nearest-ground-truth error.
 
+Calibrate those GPIS-derived features into splat-confidence predictions:
+
+```powershell
+calibrate_gpis_splat_scores `
+  --scene ignatius_tnt64 `
+  --field-scores-path real20k_sigma_0p04_gpis_field_scores.csv `
+  --thresholds 0.02 0.05 0.1
+```
+
+This consumes the per-splat field-score CSV, builds labels such as `nearest_gt_distance <= threshold`, compares current gate scores,
+isotonic calibration, and logistic calibration over GPIS posterior features, then writes validation metrics, top-k retention curves,
+calibrated splat confidences, and a report under `real_scenes/<scene>/evaluations/`.
+
 Sweep GPIS pseudo-SDF construction and model hyperparameters against those gate-quality diagnostics:
 
 ```powershell
@@ -317,6 +330,7 @@ python -m build
 - Gate-threshold geometry sweeps for checking whether GPIS confidence is useful for selecting splats
 - Gate quality diagnostics for checking whether GPIS confidence ranks and calibrates splat geometry error
 - GPIS field score diagnostics for testing whether posterior mean, uncertainty, distance, or combined scores rank splat geometry error better than the current gate
+- GPIS-derived splat confidence calibration with current-score baselines, isotonic calibration, and logistic feature models
 - Real GPIS gate model sweeps over pseudo-SDF construction modes, GPIS hyperparameters, epsilon, and gate floors
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
