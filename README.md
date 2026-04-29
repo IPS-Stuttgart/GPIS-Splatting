@@ -230,6 +230,20 @@ run_tanks_temples_gate_sweep `
 This reuses one geometry evaluation, then writes a compact `*_gate_sweep.csv` and report with retention, precision, recall, F-score,
 Chamfer, and deltas versus the ungated splat set for every `gate >= threshold` subset.
 
+Diagnose whether GPIS gates are useful as a ranking and calibration signal:
+
+```powershell
+diagnose_tanks_temples_gates `
+  --scene ignatius_tnt64 `
+  --splats-path real20k_sigma_0p04_splats.npz `
+  --model-path real20k_sigma_0p04_gpis_model.npz `
+  --thresholds 0.02 0.05 0.1 `
+  --topk-fractions 0.01 0.02 0.05 0.1 0.2 0.35 0.5 0.75 1.0
+```
+
+This writes per-splat nearest-ground-truth distances, Spearman/Pearson gate-error correlations, gate-sorted retention curves,
+and calibration-style gate bins under `real_scenes/<scene>/evaluations/`.
+
 ## Development
 
 Install the local package and development tools:
@@ -268,6 +282,7 @@ python -m build
 - Tanks and Temples `Ignatius` downloader and `.log` pose adapter for geometry-oriented real-data experiments
 - Tanks and Temples geometry evaluator with alignment/crop handling, Chamfer, precision, recall, F-score, and gate-stratified slices
 - Gate-threshold geometry sweeps for checking whether GPIS confidence is useful for selecting splats
+- Gate quality diagnostics for checking whether GPIS confidence ranks and calibrates splat geometry error
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
 - Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.
