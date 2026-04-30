@@ -97,17 +97,32 @@ def evaluate_real_renders(
 def find_prediction_image(predictions_dir: str | Path, frame: dict[str, Any]) -> Path | None:
     root = Path(predictions_dir)
     image_path = Path(frame["image_path"])
-    candidates = [
-        root / image_path,
-        root / image_path.name,
-        root / frame["file_name"],
-        root / f"{frame['index']:06d}{image_path.suffix}",
-        root / f"{frame['index']:03d}{image_path.suffix}",
-    ]
-    for candidate in candidates:
+    file_name = Path(frame["file_name"])
+    suffix = image_path.suffix or file_name.suffix
+    candidates = []
+    if not image_path.is_absolute():
+        candidates.append(root / image_path)
+    candidates.append(root / image_path.name)
+    if not file_name.is_absolute():
+        candidates.append(root / file_name)
+    candidates.append(root / file_name.name)
+    if suffix:
+        candidates.extend([root / f"{frame['index']:06d}{suffix}", root / f"{frame['index']:03d}{suffix}"])
+    for candidate in unique_paths(candidates):
         if candidate.exists():
             return candidate
     return None
+
+
+def unique_paths(paths: list[Path]) -> list[Path]:
+    seen = set()
+    unique = []
+    for path in paths:
+        key = path.resolve(strict=False)
+        if key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return unique
 
 
 def build_real_summary(

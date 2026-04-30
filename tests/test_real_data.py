@@ -7,6 +7,7 @@ import pandas as pd
 import torch
 from PIL import Image
 
+from gpis_splatting.cli.audit_real_renders import main as audit_real_renders_main
 from gpis_splatting.cli.bootstrap_real_gpis import main as bootstrap_real_gpis_main
 from gpis_splatting.cli.calibrate_gpis_splat_scores import main as calibrate_gpis_splat_scores_main
 from gpis_splatting.cli.diagnose_real_render import main as diagnose_real_render_main
@@ -119,6 +120,74 @@ def test_prepare_validate_and_evaluate_transforms_scene(tmp_path: Path) -> None:
     assert summary["missing_count"] == 0
     assert summary["psnr_delta_vs_target_baseline"] > 15.0
     assert (eval_dir / "toy_method_test_report.md").exists()
+
+    audit_real_renders_main(
+        [
+            "--scene",
+            "tiny_sparse",
+            "--prepared-root",
+            str(root),
+            "--predictions-dir",
+            str(predictions),
+            "--method-name",
+            "toy_method",
+            "--max-panels",
+            "1",
+        ]
+    )
+    audit = pd.read_csv(eval_dir / "toy_method_test_render_audit.csv")
+    audit_summary = read_json(eval_dir / "toy_method_test_render_audit_status.json")["summary"]
+    assert len(audit) == 2
+    assert audit["mse"].min() > 0.0
+    assert audit["paths_identical"].sum() == 0
+    assert audit_summary["warning_count"] == 0
+    assert (eval_dir / "toy_method_test_render_audit_panels" / "frame_000001_panel.png").exists()
+
+    audit_real_renders_main(
+        [
+            "--scene",
+            "tiny_sparse",
+            "--prepared-root",
+            str(root),
+            "--predictions-dir",
+            str(scene_dir),
+            "--method-name",
+            "target_path_bug",
+            "--max-panels",
+            "0",
+        ]
+    )
+    bug_summary = read_json(eval_dir / "target_path_bug_test_render_audit_status.json")["summary"]
+    assert bug_summary["identical_path_count"] == 2
+    assert bug_summary["exact_pixel_match_count"] == 2
+    assert bug_summary["infinite_psnr_count"] == 2
+    assert bug_summary["suspicious_infinite_psnr_count"] == 0
+
+    absolute_cameras = read_json(scene_dir / "cameras.json")
+    for frame in absolute_cameras["frames"]:
+        frame["image_path"] = str((scene_dir / frame["image_path"]).resolve())
+    write_json(scene_dir / "cameras.json", absolute_cameras)
+    audit_real_renders_main(
+        [
+            "--scene",
+            "tiny_sparse",
+            "--prepared-root",
+            str(root),
+            "--predictions-dir",
+            str(scene_dir),
+            "--method-name",
+            "absolute_target_escape_guard",
+            "--require-all",
+            "false",
+            "--max-panels",
+            "0",
+        ]
+    )
+    absolute_summary = read_json(eval_dir / "absolute_target_escape_guard_test_render_audit_status.json")["summary"]
+    assert absolute_summary["image_count"] == 0
+    assert absolute_summary["missing_count"] == 2
+    assert absolute_summary["identical_path_count"] == 0
+    assert absolute_summary["infinite_psnr_count"] == 0
 
 
 def test_prepare_colmap_text_scene(tmp_path: Path) -> None:
