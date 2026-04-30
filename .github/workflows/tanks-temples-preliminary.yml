@@ -17,10 +17,10 @@ on: # yamllint disable-line rule:truthy
         type: string
         default: ignatius_tnt64
       max_images:
-        description: Maximum number of images to extract for the prepared scene.
+        description: Maximum number of images to extract for the prepared scene. Use 0 to extract all images.
         required: true
         type: number
-        default: 64
+        default: 0
       train_view_count:
         description: Number of train views in the prepared split.
         required: true
