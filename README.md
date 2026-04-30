@@ -138,6 +138,23 @@ diagnose_real_alignment `
 This joins PSNR/SSIM with projection diagnostics such as valid-depth fraction, behind-camera count, in-frame splat fraction, approximate
 projected coverage, depth histograms, target/projected-splat overlays, target/prediction/difference panels, and a ranked failure-mode CSV.
 
+Sweep renderer appearance parameters before comparing GPIS gates:
+
+```powershell
+run_real_render_parameter_sweep `
+  --scene bicycle_sparse12 `
+  --split test `
+  --max-frames 16 `
+  --sigma-scales 0.5 1.0 1.5 `
+  --tau-scales 0.5 1.0 2.0 `
+  --min-sigma-pxs 0.6 1.0 `
+  --kernel-radii 2.0 3.0 `
+  --background-colors 0,0,0 1,1,1
+```
+
+This writes a per-variant `render_parameter_sweep.csv`, ranked CSV, `best_render_parameters.json`, a copied `best_render/` directory,
+and per-variant render metrics, audits, and optional alignment summaries under `real_scenes/<scene>/evaluations/<method-name>/`.
+
 Bootstrap first GPIS observations and initial splats from sparse real geometry:
 
 ```powershell
