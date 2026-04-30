@@ -21,6 +21,7 @@ from gpis_splatting.cli.prepare_real_scene import main as prepare_real_scene_mai
 from gpis_splatting.cli.prepare_tanks_temples_scene import main as prepare_tanks_temples_scene_main
 from gpis_splatting.cli.render_real_splats import main as render_real_splats_main
 from gpis_splatting.cli.run_real_gpis_gate_model_sweep import main as run_real_gpis_gate_model_sweep_main
+from gpis_splatting.cli.run_real_render_parameter_sweep import main as run_real_render_parameter_sweep_main
 from gpis_splatting.cli.run_tanks_temples_calibrated_splat_filtering import main as run_tanks_temples_calibrated_splat_filtering_main
 from gpis_splatting.cli.run_tanks_temples_hard_negative_calibration import main as run_tanks_temples_hard_negative_calibration_main
 from gpis_splatting.cli.run_tanks_temples_gate_sweep import main as run_tanks_temples_gate_sweep_main
@@ -507,6 +508,42 @@ def test_real_gpis_fit_render_and_evaluate_loop(tmp_path: Path) -> None:
     assert (alignment_dir / "overlays" / "frame_000000_projected_splats.png").exists()
     assert (alignment_dir / "depth_histograms" / "frame_000000_depth_histogram.png").exists()
     assert Path(row["panel_path"]).exists()
+
+    run_real_render_parameter_sweep_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--split",
+            "train",
+            "--max-frames",
+            "1",
+            "--sigma-scales",
+            "0.75",
+            "1.0",
+            "--tau-scales",
+            "1.0",
+            "--min-sigma-pxs",
+            "0.8",
+            "--kernel-radii",
+            "2.0",
+            "--background-colors",
+            "0,0,0",
+            "--alignment-coverage-downsample",
+            "1",
+            "--alignment-max-overlay-splats",
+            "3",
+        ]
+    )
+    sweep_dir = scene_dir / "evaluations" / "render_parameter_sweep"
+    sweep = pd.read_csv(sweep_dir / "render_parameter_sweep.csv")
+    ranked_sweep = pd.read_csv(sweep_dir / "render_parameter_sweep_ranked.csv")
+    best_params = read_json(sweep_dir / "best_render_parameters.json")
+    sweep_status = read_json(sweep_dir / "render_parameter_sweep_status.json")
+    assert sweep.shape[0] == 2
+    assert ranked_sweep["mean_psnr"].iloc[0] >= ranked_sweep["mean_psnr"].iloc[-1]
+    assert Path(best_params["best_render_dir"]).exists()
+    assert sweep_status["variant_count"] == 2
+    assert (Path(sweep_status["best_render_dir"]) / "real_render_report.json").exists()
 
 
 def test_real_render_diagnostics_outputs_visuals_and_metrics(tmp_path: Path) -> None:
