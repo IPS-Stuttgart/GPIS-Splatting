@@ -1,0 +1,400 @@
+---
+name: Tanks and Temples Preliminary Evidence
+
+on: # yamllint disable-line rule:truthy
+  workflow_dispatch:
+    inputs:
+      scene:
+        description: Tanks and Temples scene to download and evaluate.
+        required: true
+        type: choice
+        default: Ignatius
+        options:
+          - Ignatius
+      prepared_scene:
+        description: Name of the prepared scene directory under real_scenes/.
+        required: true
+        type: string
+        default: ignatius_tnt64
+      max_images:
+        description: Maximum number of images to extract for the prepared scene.
+        required: true
+        type: number
+        default: 64
+      train_view_count:
+        description: Number of train views in the prepared split.
+        required: true
+        type: number
+        default: 12
+      max_points:
+        description: Maximum sparse points/splats used for the bootstrap.
+        required: true
+        type: number
+        default: 10000
+      splat_sigma:
+        description: Initial world-space splat sigma.
+        required: true
+        type: string
+        default: "0.04"
+      max_train_points:
+        description: Dense GPIS training-point cap.
+        required: true
+        type: number
+        default: 1200
+      max_pred_points:
+        description: Geometry-evaluation prediction-point cap. Use 0 for all.
+        required: true
+        type: number
+        default: 50000
+      max_gt_points:
+        description: Geometry-evaluation ground-truth-point cap. Use 0 for all.
+        required: true
+        type: number
+        default: 50000
+      distance_chunk_size:
+        description: Chunk size for nearest-neighbor distance evaluation.
+        required: true
+        type: number
+        default: 128
+      thresholds:
+        description: Space-separated geometry thresholds.
+        required: true
+        type: string
+        default: "0.02 0.05 0.1"
+      gate_thresholds:
+        description: Space-separated confidence/gate thresholds.
+        required: true
+        type: string
+        default: "0.1 0.25 0.5 0.75"
+      epsilon:
+        description: GPIS zero-band half-width for model-derived gates.
+        required: true
+        type: string
+        default: "0.24"
+      gate_floor:
+        description: Floor added to model-derived gates.
+        required: true
+        type: string
+        default: "0.0"
+      run_hard_negative:
+        description: Run hard-negative confidence calibration and calibrated filtering.
+        required: true
+        type: boolean
+        default: true
+      calibration_threshold:
+        description: Calibrated gate threshold file to feed into filtering.
+        required: true
+        type: string
+        default: "0.05"
+      render_max_frames:
+        description: Number of held-out frames to render during calibrated filtering. Use 0 to skip rendering.
+        required: true
+        type: number
+        default: 0
+      run_model_sweep:
+        description: Also run a compact GPIS construction/hyperparameter gate-quality sweep.
+        required: true
+        type: boolean
+        default: false
+      cache_version:
+        description: Bump this to invalidate the downloaded-data cache.
+        required: true
+        type: string
+        default: v1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tanks-temples-preliminary-${{ github.ref }}-${{ inputs.prepared_scene }}
+  cancel-in-progress: false
+
+jobs:
+  preliminary-evidence:
+    name: Cached real-data preliminary evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      TNT_SCENE: ${{ inputs.scene }}
+      PREPARED_SCENE: ${{ inputs.prepared_scene }}
+      DOWNLOAD_ROOT: real_scenes/_downloads
+      OUTPUT_PREFIX: preliminary
+      BASELINE_METHOD: preliminary_model_gate
+      GATE_DIAGNOSTIC_METHOD: preliminary_gate_diagnostics
+      GATE_SWEEP_METHOD: preliminary_gate_sweep
+      HARD_NEGATIVE_METHOD: preliminary_hard_negative
+      FILTERING_METHOD: preliminary_confidence_filter
+      MODEL_SWEEP_NAME: preliminary_gate_model_sweep
+      MAX_IMAGES: ${{ inputs.max_images }}
+      TRAIN_VIEW_COUNT: ${{ inputs.train_view_count }}
+      MAX_POINTS: ${{ inputs.max_points }}
+      SPLAT_SIGMA: ${{ inputs.splat_sigma }}
+      MAX_TRAIN_POINTS: ${{ inputs.max_train_points }}
+      MAX_PRED_POINTS: ${{ inputs.max_pred_points }}
+      MAX_GT_POINTS: ${{ inputs.max_gt_points }}
+      DISTANCE_CHUNK_SIZE: ${{ inputs.distance_chunk_size }}
+      THRESHOLDS: ${{ inputs.thresholds }}
+      GATE_THRESHOLDS: ${{ inputs.gate_thresholds }}
+      EPSILON: ${{ inputs.epsilon }}
+      GATE_FLOOR: ${{ inputs.gate_floor }}
+      CALIBRATION_THRESHOLD: ${{ inputs.calibration_threshold }}
+      RENDER_MAX_FRAMES: ${{ inputs.render_max_frames }}
+      DATA_CACHE_VERSION: ${{ inputs.cache_version }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            pyproject.toml
+
+      - name: Restore cached Tanks and Temples assets
+        id: tnt-cache
+        uses: actions/cache@v4
+        with:
+          path: real_scenes/_downloads/tanks_temples/${{ env.TNT_SCENE }}
+          key: tnt-${{ runner.os }}-${{ env.TNT_SCENE }}-images${{ env.MAX_IMAGES }}-${{ env.DATA_CACHE_VERSION }}
+          restore-keys: |
+            tnt-${{ runner.os }}-${{ env.TNT_SCENE }}-images
+            tnt-${{ runner.os }}-${{ env.TNT_SCENE }}-
+
+      - name: Install package and dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -e .
+
+      - name: Download cached Tanks and Temples data
+        run: |
+          echo "Tanks and Temples cache hit: ${{ steps.tnt-cache.outputs.cache-hit }}" >> "${GITHUB_STEP_SUMMARY}"
+          python -m gpis_splatting.cli.download_tanks_temples_scene \
+            --scene "${TNT_SCENE}" \
+            --output-root "${DOWNLOAD_ROOT}" \
+            --max-images "${MAX_IMAGES}"
+
+      - name: Prepare normalized real scene
+        run: |
+          python -m gpis_splatting.cli.prepare_tanks_temples_scene \
+            --input-dir "${DOWNLOAD_ROOT}/tanks_temples/${TNT_SCENE}" \
+            --scene "${TNT_SCENE}" \
+            --prepared-scene "${PREPARED_SCENE}" \
+            --train-view-count "${TRAIN_VIEW_COUNT}"
+          python -m gpis_splatting.cli.validate_real_scene \
+            --scene "${PREPARED_SCENE}"
+
+      - name: Bootstrap and fit GPIS
+        run: |
+          python -m gpis_splatting.cli.bootstrap_real_gpis \
+            --scene "${PREPARED_SCENE}" \
+            --output-prefix "${OUTPUT_PREFIX}" \
+            --point-source auto \
+            --max-points "${MAX_POINTS}" \
+            --splat-sigma "${SPLAT_SIGMA}"
+          python -m gpis_splatting.cli.fit_real_gpis \
+            --scene "${PREPARED_SCENE}" \
+            --samples-path "${OUTPUT_PREFIX}_samples.npz" \
+            --output-model "${OUTPUT_PREFIX}_gpis_model.npz" \
+            --max-train-points "${MAX_TRAIN_POINTS}"
+
+      - name: Evaluate GPIS gate geometry
+        run: |
+          read -r -a THRESHOLD_ARGS <<< "${THRESHOLDS}"
+          read -r -a GATE_THRESHOLD_ARGS <<< "${GATE_THRESHOLDS}"
+          python -m gpis_splatting.cli.evaluate_tanks_temples_geometry \
+            --scene "${PREPARED_SCENE}" \
+            --splats-path "${OUTPUT_PREFIX}_splats.npz" \
+            --model-path "${OUTPUT_PREFIX}_gpis_model.npz" \
+            --method-name "${BASELINE_METHOD}" \
+            --thresholds "${THRESHOLD_ARGS[@]}" \
+            --gate-thresholds "${GATE_THRESHOLD_ARGS[@]}" \
+            --epsilon "${EPSILON}" \
+            --gate-floor "${GATE_FLOOR}" \
+            --max-pred-points "${MAX_PRED_POINTS}" \
+            --max-gt-points "${MAX_GT_POINTS}" \
+            --distance-chunk-size "${DISTANCE_CHUNK_SIZE}"
+
+      - name: Diagnose and sweep GPIS gates
+        run: |
+          read -r -a THRESHOLD_ARGS <<< "${THRESHOLDS}"
+          read -r -a GATE_THRESHOLD_ARGS <<< "${GATE_THRESHOLDS}"
+          python -m gpis_splatting.cli.diagnose_tanks_temples_gates \
+            --scene "${PREPARED_SCENE}" \
+            --splats-path "${OUTPUT_PREFIX}_splats.npz" \
+            --model-path "${OUTPUT_PREFIX}_gpis_model.npz" \
+            --method-name "${GATE_DIAGNOSTIC_METHOD}" \
+            --thresholds "${THRESHOLD_ARGS[@]}" \
+            --epsilon "${EPSILON}" \
+            --gate-floor "${GATE_FLOOR}" \
+            --max-pred-points "${MAX_PRED_POINTS}" \
+            --max-gt-points "${MAX_GT_POINTS}" \
+            --distance-chunk-size "${DISTANCE_CHUNK_SIZE}"
+          python -m gpis_splatting.cli.run_tanks_temples_gate_sweep \
+            --scene "${PREPARED_SCENE}" \
+            --splats-path "${OUTPUT_PREFIX}_splats.npz" \
+            --model-path "${OUTPUT_PREFIX}_gpis_model.npz" \
+            --method-name "${GATE_SWEEP_METHOD}" \
+            --thresholds "${THRESHOLD_ARGS[@]}" \
+            --gate-thresholds "${GATE_THRESHOLD_ARGS[@]}" \
+            --epsilon "${EPSILON}" \
+            --gate-floor "${GATE_FLOOR}" \
+            --max-pred-points "${MAX_PRED_POINTS}" \
+            --max-gt-points "${MAX_GT_POINTS}" \
+            --distance-chunk-size "${DISTANCE_CHUNK_SIZE}"
+
+      - name: Run hard-negative calibration
+        if: ${{ inputs.run_hard_negative }}
+        run: |
+          read -r -a THRESHOLD_ARGS <<< "${THRESHOLDS}"
+          python -m gpis_splatting.cli.run_tanks_temples_hard_negative_calibration \
+            --scene "${PREPARED_SCENE}" \
+            --splats-path "${OUTPUT_PREFIX}_splats.npz" \
+            --model-path "${OUTPUT_PREFIX}_gpis_model.npz" \
+            --method-name "${HARD_NEGATIVE_METHOD}" \
+            --thresholds "${THRESHOLD_ARGS[@]}" \
+            --epsilon "${EPSILON}" \
+            --gate-floor "${GATE_FLOOR}" \
+            --max-source-splats "${MAX_PRED_POINTS}" \
+            --max-pred-points "${MAX_PRED_POINTS}" \
+            --max-gt-points "${MAX_GT_POINTS}" \
+            --distance-chunk-size "${DISTANCE_CHUNK_SIZE}"
+
+      - name: Locate calibrated hard-negative outputs
+        if: ${{ inputs.run_hard_negative }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          scene_dir = Path("real_scenes") / os.environ["PREPARED_SCENE"]
+          eval_dir = scene_dir / "evaluations"
+          method = os.environ["HARD_NEGATIVE_METHOD"]
+          threshold_label = os.environ["CALIBRATION_THRESHOLD"].replace(".", "p")
+
+          splat_candidates = sorted(eval_dir.glob(f"{method}_hard_negative_splats.npz"))
+          if not splat_candidates:
+              splat_candidates = sorted(eval_dir.glob("*hard_negative_splats.npz"))
+          gate_candidates = sorted(eval_dir.glob(f"{method}_hard_negative_calibrated_gate_{threshold_label}.npz"))
+          if not gate_candidates:
+              gate_candidates = sorted(eval_dir.glob(f"*calibrated_gate_{threshold_label}.npz"))
+          if not gate_candidates:
+              gate_candidates = sorted(eval_dir.glob("*calibrated_gate_*.npz"))
+
+          if not splat_candidates:
+              raise SystemExit("No hard-negative splat file was produced.")
+          if not gate_candidates:
+              raise SystemExit("No calibrated gate file was produced.")
+
+          splats_rel = splat_candidates[0].relative_to(scene_dir)
+          gate_rel = gate_candidates[0].relative_to(scene_dir)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"HARD_NEGATIVE_SPLATS_PATH={splats_rel}\n")
+              env_file.write(f"CALIBRATED_GATE_PATH={gate_rel}\n")
+          print(f"Hard-negative splats: {splats_rel}")
+          print(f"Calibrated gate: {gate_rel}")
+          PY
+
+      - name: Evaluate calibrated splat filtering
+        if: ${{ inputs.run_hard_negative }}
+        run: |
+          read -r -a THRESHOLD_ARGS <<< "${THRESHOLDS}"
+          read -r -a GATE_THRESHOLD_ARGS <<< "${GATE_THRESHOLDS}"
+          python -m gpis_splatting.cli.run_tanks_temples_calibrated_splat_filtering \
+            --scene "${PREPARED_SCENE}" \
+            --splats-path "${HARD_NEGATIVE_SPLATS_PATH}" \
+            --gate-path "${CALIBRATED_GATE_PATH}" \
+            --method-name "${FILTERING_METHOD}" \
+            --gate-thresholds "${GATE_THRESHOLD_ARGS[@]}" \
+            --thresholds "${THRESHOLD_ARGS[@]}" \
+            --max-pred-points "${MAX_PRED_POINTS}" \
+            --max-gt-points "${MAX_GT_POINTS}" \
+            --distance-chunk-size "${DISTANCE_CHUNK_SIZE}" \
+            --render-max-frames "${RENDER_MAX_FRAMES}"
+
+      - name: Run compact GPIS gate model sweep
+        if: ${{ inputs.run_model_sweep }}
+        run: |
+          python -m gpis_splatting.cli.run_real_gpis_gate_model_sweep \
+            --scene "${PREPARED_SCENE}" \
+            --sweep-name "${MODEL_SWEEP_NAME}" \
+            --construction-modes surface_free strong_free behind_surface \
+            --lengthscales 0.15 0.25 \
+            --noise-stds 0.03 0.06 \
+            --epsilons 0.16 0.24 \
+            --gate-floors 0.0 0.25 \
+            --max-bootstrap-points "${MAX_POINTS}" \
+            --max-train-points "${MAX_TRAIN_POINTS}"
+
+      - name: Create preliminary result summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          scene_dir = Path("real_scenes") / os.environ["PREPARED_SCENE"]
+          eval_dir = scene_dir / "evaluations"
+          out_path = eval_dir / "preliminary_results_summary.md"
+          eval_dir.mkdir(parents=True, exist_ok=True)
+
+          lines = [
+              "# Tanks and Temples Preliminary Evidence",
+              "",
+              f"- Scene: `{os.environ['TNT_SCENE']}`",
+              f"- Prepared scene: `{os.environ['PREPARED_SCENE']}`",
+              f"- Max images: `{os.environ['MAX_IMAGES']}`",
+              f"- Max bootstrap points: `{os.environ['MAX_POINTS']}`",
+              f"- Max GPIS train points: `{os.environ['MAX_TRAIN_POINTS']}`",
+              f"- Geometry thresholds: `{os.environ['THRESHOLDS']}`",
+              f"- Gate thresholds: `{os.environ['GATE_THRESHOLDS']}`",
+              "",
+          ]
+
+          for report in sorted(eval_dir.rglob("*report.md")):
+              if report.name == out_path.name:
+                  continue
+              lines.extend(["", f"## {report.relative_to(eval_dir)}", ""])
+              lines.append(report.read_text(encoding="utf-8"))
+
+          for status_file in sorted(eval_dir.rglob("*status.json")):
+              try:
+                  status = json.loads(status_file.read_text(encoding="utf-8"))
+              except json.JSONDecodeError:
+                  continue
+              lines.extend(["", f"## Status: {status_file.relative_to(eval_dir)}", ""])
+              for key in ("method", "scene", "variant_count", "summary_path", "threshold_metrics_path", "comparison_path", "report_path"):
+                  if key in status:
+                      lines.append(f"- {key}: `{status[key]}`")
+
+          out_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+          print(out_path)
+          PY
+          cat "real_scenes/${PREPARED_SCENE}/evaluations/preliminary_results_summary.md" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload preliminary evidence artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tanks-temples-preliminary-${{ env.PREPARED_SCENE }}
+          path: |
+            real_scenes/${{ env.PREPARED_SCENE }}/*_bootstrap_report.json
+            real_scenes/${{ env.PREPARED_SCENE }}/*_fit_report.json
+            real_scenes/${{ env.PREPARED_SCENE }}/real_scene.json
+            real_scenes/${{ env.PREPARED_SCENE }}/cameras.json
+            real_scenes/${{ env.PREPARED_SCENE }}/splits.json
+            real_scenes/${{ env.PREPARED_SCENE }}/validation.json
+            real_scenes/${{ env.PREPARED_SCENE }}/evaluations/**/*.csv
+            real_scenes/${{ env.PREPARED_SCENE }}/evaluations/**/*.json
+            real_scenes/${{ env.PREPARED_SCENE }}/evaluations/**/*.md
+            real_scenes/${{ env.PREPARED_SCENE }}/evaluations/**/*.npz
+            real_scenes/${{ env.PREPARED_SCENE }}/model_sweeps/**/*.csv
+            real_scenes/${{ env.PREPARED_SCENE }}/model_sweeps/**/*.json
+            real_scenes/${{ env.PREPARED_SCENE }}/model_sweeps/**/*.md
+            real_scenes/${{ env.PREPARED_SCENE }}/renders/**/real_render_report.json
+            real_scenes/${{ env.PREPARED_SCENE }}/renders/**/*.png
