@@ -125,6 +125,19 @@ audit_real_renders `
 This checks that target and prediction paths are not identical, records per-image MSE and pixel-difference statistics, includes render
 report coverage fields such as drawn splat count when available, and writes target/prediction/difference panels.
 
+Diagnose whether bad render metrics are caused by camera/projection alignment before tuning GPIS gates:
+
+```powershell
+diagnose_real_alignment `
+  --scene bicycle_sparse12 `
+  --render-dir real_scenes\bicycle_sparse12\renders\real_gpis_gate `
+  --split test `
+  --max-frames 16
+```
+
+This joins PSNR/SSIM with projection diagnostics such as valid-depth fraction, behind-camera count, in-frame splat fraction, approximate
+projected coverage, depth histograms, target/projected-splat overlays, target/prediction/difference panels, and a ranked failure-mode CSV.
+
 Bootstrap first GPIS observations and initial splats from sparse real geometry:
 
 ```powershell

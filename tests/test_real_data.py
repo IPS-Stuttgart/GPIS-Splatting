@@ -10,6 +10,7 @@ from PIL import Image
 from gpis_splatting.cli.audit_real_renders import main as audit_real_renders_main
 from gpis_splatting.cli.bootstrap_real_gpis import main as bootstrap_real_gpis_main
 from gpis_splatting.cli.calibrate_gpis_splat_scores import main as calibrate_gpis_splat_scores_main
+from gpis_splatting.cli.diagnose_real_alignment import main as diagnose_real_alignment_main
 from gpis_splatting.cli.diagnose_real_render import main as diagnose_real_render_main
 from gpis_splatting.cli.diagnose_tanks_temples_gpis_field_scores import main as diagnose_tanks_temples_gpis_field_scores_main
 from gpis_splatting.cli.diagnose_tanks_temples_gates import main as diagnose_tanks_temples_gates_main
@@ -473,6 +474,39 @@ def test_real_gpis_fit_render_and_evaluate_loop(tmp_path: Path) -> None:
     metrics = pd.read_csv(scene_dir / "evaluations" / "real_gpis_gate_train_image_metrics.csv")
     assert len(metrics) == 1
     assert np.isfinite(metrics["ssim"]).all()
+
+    diagnose_real_alignment_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--render-dir",
+            str(render_dir),
+            "--split",
+            "train",
+            "--max-frames",
+            "1",
+            "--coverage-downsample",
+            "1",
+            "--max-overlay-splats",
+            "3",
+        ]
+    )
+    alignment_dir = scene_dir / "diagnostics" / "real_alignment" / "real_gpis_gate"
+    alignment = pd.read_csv(alignment_dir / "real_alignment_frames.csv")
+    ranked = pd.read_csv(alignment_dir / "real_alignment_ranked.csv")
+    alignment_status = read_json(alignment_dir / "real_alignment_status.json")
+    assert len(alignment) == 1
+    row = alignment.iloc[0]
+    assert not bool(row["missing_prediction"])
+    assert row["valid_depth_fraction"] >= 0.0
+    assert row["in_frame_fraction"] >= 0.0
+    assert row["projected_coverage_fraction"] >= 0.0
+    assert row["failure_mode"] in set(ranked["failure_mode"])
+    assert alignment_status["summary"]["frame_count"] == 1
+    assert alignment_status["summary"]["evaluated_count"] == 1
+    assert (alignment_dir / "overlays" / "frame_000000_projected_splats.png").exists()
+    assert (alignment_dir / "depth_histograms" / "frame_000000_depth_histogram.png").exists()
+    assert Path(row["panel_path"]).exists()
 
 
 def test_real_render_diagnostics_outputs_visuals_and_metrics(tmp_path: Path) -> None:
