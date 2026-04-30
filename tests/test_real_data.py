@@ -19,6 +19,7 @@ from gpis_splatting.cli.prepare_real_scene import main as prepare_real_scene_mai
 from gpis_splatting.cli.prepare_tanks_temples_scene import main as prepare_tanks_temples_scene_main
 from gpis_splatting.cli.render_real_splats import main as render_real_splats_main
 from gpis_splatting.cli.run_real_gpis_gate_model_sweep import main as run_real_gpis_gate_model_sweep_main
+from gpis_splatting.cli.run_tanks_temples_calibrated_splat_filtering import main as run_tanks_temples_calibrated_splat_filtering_main
 from gpis_splatting.cli.run_tanks_temples_hard_negative_calibration import main as run_tanks_temples_hard_negative_calibration_main
 from gpis_splatting.cli.run_tanks_temples_gate_sweep import main as run_tanks_temples_gate_sweep_main
 from gpis_splatting.cli.validate_real_scene import main as validate_real_scene_main
@@ -26,7 +27,7 @@ from gpis_splatting.real_bootstrap import load_ply_point_cloud
 from gpis_splatting.real_geometry import crop_mask, evaluate_geometry_group
 from gpis_splatting.real_scene import build_sparse_split
 from gpis_splatting.serialization import read_json, write_json
-from gpis_splatting.splats import SplatCloud, save_splats
+from gpis_splatting.splats import SplatCloud, load_splats, save_splats
 from gpis_splatting.tanks_temples import google_drive_confirm_url_from_html, read_tanks_temples_log
 
 
@@ -1029,6 +1030,47 @@ def test_run_tanks_temples_hard_negative_calibration_cli(tmp_path: Path) -> None
     assert hard_gate["gate"].shape == (candidates.shape[0],)
     assert hard_gate["scored_mask"].sum() == fields.shape[0]
     assert (eval_dir / "toy_hard_hard_negative_workflow_report.md").exists()
+
+    manual_gate = np.linspace(0.0, 1.0, candidates.shape[0], dtype=np.float64)
+    np.savez_compressed(eval_dir / "toy_manual_gate.npz", gate=manual_gate)
+    run_tanks_temples_calibrated_splat_filtering_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--splats-path",
+            "evaluations/toy_hard_hard_negative_splats.npz",
+            "--gate-path",
+            "evaluations/toy_manual_gate.npz",
+            "--method-name",
+            "toy_filter",
+            "--gate-thresholds",
+            "0.5",
+            "--thresholds",
+            "0.05",
+            "--max-gt-points",
+            "0",
+            "--max-pred-points",
+            "0",
+            "--distance-chunk-size",
+            "2",
+            "--render-split",
+            "train",
+            "--render-max-frames",
+            "1",
+        ]
+    )
+
+    comparison = pd.read_csv(eval_dir / "toy_filter_splat_filtering_comparison.csv")
+    status = read_json(eval_dir / "toy_filter_splat_filtering_status.json")
+    filtered_splats = load_splats(str(eval_dir / "toy_filter_gate_ge_0p5_splats.npz"))
+    scaled_splats = load_splats(str(eval_dir / "toy_filter_gate_scaled_splats.npz"))
+    generated_splats = load_splats(str(eval_dir / "toy_hard_hard_negative_splats.npz"))
+    assert status["variant_count"] == 3
+    assert set(comparison["variant"]) == {"baseline", "gate_scaled", "gate_ge_0p5"}
+    assert filtered_splats.centers.shape[0] == int(np.sum(manual_gate >= 0.5))
+    assert np.allclose(scaled_splats.tau.numpy(), generated_splats.tau.numpy() * manual_gate)
+    assert comparison["mean_psnr"].notna().any()
+    assert (eval_dir / "toy_filter_splat_filtering_report.md").exists()
 
 
 def _write_image(path: Path, *, value: int) -> None:

@@ -41,6 +41,7 @@ run_real_gpis_gate_model_sweep = "gpis_splatting.cli.run_real_gpis_gate_model_sw
 diagnose_tanks_temples_gpis_field_scores = "gpis_splatting.cli.diagnose_tanks_temples_gpis_field_scores:main"
 calibrate_gpis_splat_scores = "gpis_splatting.cli.calibrate_gpis_splat_scores:main"
 run_tanks_temples_hard_negative_calibration = "gpis_splatting.cli.run_tanks_temples_hard_negative_calibration:main"
+run_tanks_temples_calibrated_splat_filtering = "gpis_splatting.cli.run_tanks_temples_calibrated_splat_filtering:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
