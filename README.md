@@ -113,6 +113,18 @@ evaluate_real_renders `
 This writes per-image PSNR/SSIM metrics, a summary CSV, and a Markdown report under `real_scenes/<scene>/evaluations/`.
 LPIPS can be enabled with `--compute-lpips true` when the optional `lpips` package is installed.
 
+Audit a render evaluation when PSNR/SSIM look suspicious:
+
+```powershell
+audit_real_renders `
+  --scene bicycle_sparse12 `
+  --predictions-dir C:\runs\gpis_splatting\bicycle\renders `
+  --method-name gpis_splatting
+```
+
+This checks that target and prediction paths are not identical, records per-image MSE and pixel-difference statistics, includes render
+report coverage fields such as drawn splat count when available, and writes target/prediction/difference panels.
+
 Bootstrap first GPIS observations and initial splats from sparse real geometry:
 
 ```powershell
@@ -378,6 +390,7 @@ python -m build
 - Hard-negative real-splat workflow that generates off-surface candidates, scores them with GPIS, and calibrates confidence on mixed source/negative sets
 - Calibrated splat filtering workflow that writes compacted/tau-scaled splat variants and compares geometry plus render metrics
 - Real GPIS gate model sweeps over pseudo-SDF construction modes, GPIS hyperparameters, epsilon, and gate floors
+- Render audit workflow for checking path mistakes, exact pixel matches, image coverage, and pixel-difference panels
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
 - Source code is kept in `src/gpis_splatting/`, with tests in `tests/`.
