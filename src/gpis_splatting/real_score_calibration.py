@@ -116,6 +116,8 @@ def run_gpis_splat_score_calibration(
     learning_rate: float = 0.05,
     regularization: float = 1e-3,
     num_bins: int = 10,
+    gate_count: int | None = None,
+    missing_gate_value: float = 0.0,
 ) -> dict[str, Any]:
     validate_calibration_config(
         thresholds=thresholds,
@@ -127,6 +129,7 @@ def run_gpis_splat_score_calibration(
         regularization=regularization,
         num_bins=num_bins,
     )
+    validate_gate_export_config(gate_count=gate_count, missing_gate_value=missing_gate_value)
     baseline_scores = DEFAULT_BASELINE_SCORES if baseline_scores is None else baseline_scores
     isotonic_scores = ("score_current_gate", "score_raw_surface_band", "score_variance_penalized_band") if isotonic_scores is None else isotonic_scores
     field_path = Path(field_scores_path)
@@ -214,6 +217,17 @@ def run_gpis_splat_score_calibration(
     ranked_path = out_dir / f"{prefix}_calibration_ranked.csv"
     predictions_path = out_dir / f"{prefix}_calibrated_splat_scores.csv"
     confidence_path = out_dir / f"{prefix}_calibrated_confidence.npz"
+    gate_paths = write_gate_compatible_confidences(
+        predictions=predictions,
+        out_dir=out_dir,
+        prefix=prefix,
+        thresholds=thresholds,
+        predictions_path=predictions_path,
+        gate_count=gate_count,
+        missing_gate_value=missing_gate_value,
+    )
+    scored_splat_count = int(np.unique(predictions["splat_index"].to_numpy(dtype=np.int64)).shape[0])
+    gate_missing_count = 0 if gate_count is None else int(gate_count - scored_splat_count)
     status_path = out_dir / f"{prefix}_calibration_status.json"
     report_path = out_dir / f"{prefix}_calibration_report.md"
     summary.to_csv(summary_path, index=False)
@@ -246,6 +260,11 @@ def run_gpis_splat_score_calibration(
         "ranked_path": str(ranked_path),
         "predictions_path": str(predictions_path),
         "confidence_path": str(confidence_path),
+        "gate_paths": {key: str(value) for key, value in gate_paths.items()},
+        "gate_count": gate_count,
+        "gate_scored_count": scored_splat_count,
+        "gate_missing_count": gate_missing_count,
+        "missing_gate_value": missing_gate_value,
         "report_path": str(report_path),
         "best_by_threshold": best_by_threshold,
     }
@@ -256,6 +275,7 @@ def run_gpis_splat_score_calibration(
         "ranked_path": ranked_path,
         "predictions_path": predictions_path,
         "confidence_path": confidence_path,
+        "gate_paths": gate_paths,
         "status_path": status_path,
         "report_path": report_path,
         "summary": summary,
@@ -263,6 +283,71 @@ def run_gpis_splat_score_calibration(
         "predictions": predictions,
         "status": status,
     }
+
+
+def write_gate_compatible_confidences(
+    *,
+    predictions: pd.DataFrame,
+    out_dir: Path,
+    prefix: str,
+    thresholds: tuple[float, ...],
+    predictions_path: Path,
+    gate_count: int | None = None,
+    missing_gate_value: float = 0.0,
+) -> dict[str, Path]:
+    gate_paths = {}
+    scored_splat_index = predictions["splat_index"].to_numpy(dtype=np.int64)
+    output_splat_index, scored_mask = build_gate_index(
+        scored_splat_index=scored_splat_index,
+        gate_count=gate_count,
+    )
+    for threshold in thresholds:
+        label = format_threshold_label(threshold)
+        confidence_column = f"confidence_{label}"
+        method_column = f"selected_method_{label}"
+        if confidence_column not in predictions.columns:
+            continue
+        scored_gate = np.clip(predictions[confidence_column].to_numpy(dtype=np.float64), 0.0, 1.0)
+        if gate_count is None:
+            gate = scored_gate
+        else:
+            gate = np.full((gate_count,), missing_gate_value, dtype=np.float64)
+            gate[scored_splat_index] = scored_gate
+        selected_method = (
+            str(predictions[method_column].iloc[0]) if method_column in predictions.columns and len(predictions) else ""
+        )
+        path = out_dir / f"{prefix}_gate_{label}.npz"
+        np.savez_compressed(
+            path,
+            gate=gate,
+            raw_gate=gate,
+            splat_index=output_splat_index,
+            scored_splat_index=scored_splat_index,
+            scored_mask=scored_mask,
+            geometry_threshold=np.asarray(float(threshold), dtype=np.float64),
+            selected_method=np.asarray(selected_method),
+            predictions_path=np.asarray(str(predictions_path)),
+            missing_gate_value=np.asarray(float(missing_gate_value), dtype=np.float64),
+            scored_count=np.asarray(int(scored_splat_index.shape[0]), dtype=np.int64),
+            missing_count=np.asarray(int(scored_mask.shape[0] - scored_mask.sum()), dtype=np.int64),
+        )
+        gate_paths[label] = path
+    return gate_paths
+
+
+def build_gate_index(*, scored_splat_index: np.ndarray, gate_count: int | None) -> tuple[np.ndarray, np.ndarray]:
+    if scored_splat_index.size and np.any(scored_splat_index < 0):
+        raise ValueError("splat_index values must be non-negative to export gate-compatible confidence files.")
+    unique_count = int(np.unique(scored_splat_index).shape[0])
+    if unique_count != int(scored_splat_index.shape[0]):
+        raise ValueError("splat_index values must be unique to export gate-compatible confidence files.")
+    if gate_count is None:
+        return scored_splat_index, np.ones(scored_splat_index.shape, dtype=bool)
+    if scored_splat_index.size and int(scored_splat_index.max()) >= gate_count:
+        raise ValueError("gate_count must be greater than every scored splat_index.")
+    scored_mask = np.zeros((gate_count,), dtype=bool)
+    scored_mask[scored_splat_index] = True
+    return np.arange(gate_count, dtype=np.int64), scored_mask
 
 
 def validate_calibration_config(
@@ -288,6 +373,13 @@ def validate_calibration_config(
         raise ValueError("learning_rate must be positive.")
     if regularization < 0.0:
         raise ValueError("regularization must be non-negative.")
+
+
+def validate_gate_export_config(*, gate_count: int | None, missing_gate_value: float) -> None:
+    if gate_count is not None and gate_count < 1:
+        raise ValueError("gate_count must be positive when provided.")
+    if not 0.0 <= missing_gate_value <= 1.0:
+        raise ValueError("missing_gate_value must be in [0, 1].")
 
 
 def prepare_feature_table(table: pd.DataFrame) -> pd.DataFrame:
@@ -604,6 +696,8 @@ def format_calibration_report(status: dict[str, Any], summary: pd.DataFrame) -> 
         f"- Ranked CSV: `{status['ranked_path']}`",
         f"- Calibrated scores CSV: `{status['predictions_path']}`",
         f"- Confidence NPZ: `{status['confidence_path']}`",
+        f"- Gate-compatible NPZs: `{len(status.get('gate_paths', {}))}`",
+        f"- Gate entries filled from missing scores: `{status.get('gate_missing_count', 0)}`",
         "",
         "## Best Calibrators",
         "",

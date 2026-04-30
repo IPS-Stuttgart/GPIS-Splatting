@@ -44,6 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--learning-rate", type=float, default=0.05)
     parser.add_argument("--regularization", type=float, default=1e-3)
     parser.add_argument("--num-bins", type=int, default=10, help="ECE bin count. Must be positive.")
+    parser.add_argument("--gate-count", type=int, default=None, help="Optional full splat count for gate-compatible NPZ exports.")
+    parser.add_argument("--missing-gate-value", type=float, default=0.0, help="Gate value for unscored splat indices when --gate-count is used.")
     return parser
 
 
@@ -64,6 +66,8 @@ def main(argv: list[str] | None = None) -> None:
         learning_rate=args.learning_rate,
         regularization=args.regularization,
         num_bins=args.num_bins,
+        gate_count=args.gate_count,
+        missing_gate_value=args.missing_gate_value,
     )
     print(f"Wrote {result['summary_path']}")
     print(f"Wrote {result['ranked_path']}")

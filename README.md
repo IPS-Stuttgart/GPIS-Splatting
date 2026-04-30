@@ -269,7 +269,19 @@ calibrate_gpis_splat_scores `
 
 This consumes the per-splat field-score CSV, builds labels such as `nearest_gt_distance <= threshold`, compares current gate scores,
 isotonic calibration, and logistic calibration over GPIS posterior features, then writes validation metrics, top-k retention curves,
-calibrated splat confidences, and a report under `real_scenes/<scene>/evaluations/`.
+calibrated splat confidences, gate-compatible `*_gate_<threshold>.npz` files, and a report under `real_scenes/<scene>/evaluations/`.
+Those gate files can be passed to `evaluate_tanks_temples_geometry --gate-path` for geometry slices or to `render_real_splats --gate-path`
+to apply calibrated confidence as an optical-thickness gate. When the hard-negative workflow filters splats during crop or subsampling,
+unscored candidates are exported with zero confidence:
+
+```powershell
+render_real_splats `
+  --scene ignatius_tnt64 `
+  --splats-path evaluations/ignatius_hard_negative_v1_hard_negative_splats.npz `
+  --gate-path evaluations/ignatius_hard_negative_v1_hard_negative_calibrated_gate_0p05.npz `
+  --method-name calibrated_confidence_gate `
+  --use-gpis-gate false
+```
 
 Run a harder mixed-candidate calibration workflow with generated off-surface splat candidates:
 
@@ -284,7 +296,8 @@ run_tanks_temples_hard_negative_calibration `
 
 This creates source, jittered, camera-ray, behind-surface, and crop-random candidate splats, scores the mixed set with GPIS field
 diagnostics, and calibrates splat confidence on nearest-ground-truth labels. The workflow is intended to test whether GPIS-derived
-confidence rejects floating or off-surface artifacts, rather than mostly ranking already-good source splats.
+confidence rejects floating or off-surface artifacts, rather than mostly ranking already-good source splats. It also exports the
+threshold-specific calibrated gates needed by downstream geometry and rendering checks.
 
 Sweep GPIS pseudo-SDF construction and model hyperparameters against those gate-quality diagnostics:
 
@@ -345,7 +358,7 @@ python -m build
 - Gate-threshold geometry sweeps for checking whether GPIS confidence is useful for selecting splats
 - Gate quality diagnostics for checking whether GPIS confidence ranks and calibrates splat geometry error
 - GPIS field score diagnostics for testing whether posterior mean, uncertainty, distance, or combined scores rank splat geometry error better than the current gate
-- GPIS-derived splat confidence calibration with current-score baselines, isotonic calibration, and logistic feature models
+- GPIS-derived splat confidence calibration with downstream gate NPZ exports, current-score baselines, isotonic calibration, and logistic feature models
 - Hard-negative real-splat workflow that generates off-surface candidates, scores them with GPIS, and calibrates confidence on mixed source/negative sets
 - Real GPIS gate model sweeps over pseudo-SDF construction modes, GPIS hyperparameters, epsilon, and gate floors
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images

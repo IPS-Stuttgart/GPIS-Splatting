@@ -142,6 +142,8 @@ def run_tanks_temples_hard_negative_calibration(
         topk_fractions=topk_fractions,
         validation_fraction=calibration_validation_fraction,
         seed=seed,
+        gate_count=int(generated.status["candidate_count"]),
+        missing_gate_value=0.0,
     )
     status_path = out_dir / f"{method_name}_hard_negative_workflow_status.json"
     report_path = out_dir / f"{method_name}_hard_negative_workflow_report.md"
@@ -158,6 +160,10 @@ def run_tanks_temples_hard_negative_calibration(
         "calibration_summary_path": str(calibration_result["summary_path"]),
         "calibrated_scores_path": str(calibration_result["predictions_path"]),
         "calibrated_confidence_path": str(calibration_result["confidence_path"]),
+        "calibrated_gate_paths": {
+            key: str(value) for key, value in calibration_result["status"].get("gate_paths", {}).items()
+        },
+        "calibrated_gate_missing_count": calibration_result["status"].get("gate_missing_count"),
         "thresholds": list(thresholds),
         "topk_fractions": list(topk_fractions),
         "best_calibrators": calibration_result["status"]["best_by_threshold"],
@@ -527,6 +533,8 @@ def format_hard_negative_workflow_report(status: dict[str, Any], calibration_sum
         f"- Field scores: `{status['field_scores_path']}`",
         f"- Calibration summary: `{status['calibration_summary_path']}`",
         f"- Calibrated confidence: `{status['calibrated_confidence_path']}`",
+        f"- Gate-compatible NPZs: `{len(status.get('calibrated_gate_paths', {}))}`",
+        f"- Gate entries filled from missing scores: `{status.get('calibrated_gate_missing_count', 0)}`",
         "",
         "## Candidate Counts",
         "",
