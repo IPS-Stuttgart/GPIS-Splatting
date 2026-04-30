@@ -326,11 +326,17 @@ def build_variant_row(
 
 def rank_sweep(sweep: pd.DataFrame, *, selection_metric: str) -> pd.DataFrame:
     ranked = sweep.copy()
-    ranked["_selection"] = pd.to_numeric(ranked[selection_metric], errors="coerce").fillna(-np.inf)
-    ranked["_ssim"] = pd.to_numeric(ranked.get("mean_ssim"), errors="coerce").fillna(-np.inf)
-    ranked["_coverage"] = pd.to_numeric(ranked.get("mean_projected_coverage_fraction"), errors="coerce").fillna(-np.inf)
+    ranked["_selection"] = numeric_rank_column(ranked, selection_metric)
+    ranked["_ssim"] = numeric_rank_column(ranked, "mean_ssim")
+    ranked["_coverage"] = numeric_rank_column(ranked, "mean_projected_coverage_fraction")
     ranked = ranked.sort_values(["_selection", "_ssim", "_coverage"], ascending=[False, False, False])
     return ranked.drop(columns=["_selection", "_ssim", "_coverage"])
+
+
+def numeric_rank_column(dataframe: pd.DataFrame, column: str) -> pd.Series:
+    if column not in dataframe:
+        return pd.Series(-np.inf, index=dataframe.index, dtype=np.float64)
+    return pd.to_numeric(dataframe[column], errors="coerce").fillna(-np.inf)
 
 
 def copy_best_render_dir(source: Path, target: Path) -> Path:

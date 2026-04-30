@@ -545,6 +545,34 @@ def test_real_gpis_fit_render_and_evaluate_loop(tmp_path: Path) -> None:
     assert sweep_status["variant_count"] == 2
     assert (Path(sweep_status["best_render_dir"]) / "real_render_report.json").exists()
 
+    run_real_render_parameter_sweep_main(
+        [
+            "--scene-dir",
+            str(scene_dir),
+            "--method-name",
+            "render_parameter_sweep_no_alignment",
+            "--split",
+            "train",
+            "--max-frames",
+            "1",
+            "--sigma-scales",
+            "1.0",
+            "--tau-scales",
+            "1.0",
+            "--min-sigma-pxs",
+            "0.8",
+            "--kernel-radii",
+            "2.0",
+            "--background-colors",
+            "0,0,0",
+            "--run-alignment",
+            "false",
+        ]
+    )
+    no_alignment_ranked = pd.read_csv(scene_dir / "evaluations" / "render_parameter_sweep_no_alignment" / "render_parameter_sweep_ranked.csv")
+    assert no_alignment_ranked.shape[0] == 1
+    assert "mean_projected_coverage_fraction" not in no_alignment_ranked.columns
+
 
 def test_real_render_diagnostics_outputs_visuals_and_metrics(tmp_path: Path) -> None:
     root = _prepare_colmap_scene_with_points(tmp_path)
