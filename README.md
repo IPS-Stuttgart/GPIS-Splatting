@@ -283,6 +283,22 @@ render_real_splats `
   --use-gpis-gate false
 ```
 
+Turn calibrated confidence into compacted or tau-scaled splat variants and evaluate each variant:
+
+```powershell
+run_tanks_temples_calibrated_splat_filtering `
+  --scene ignatius_tnt64 `
+  --splats-path evaluations/ignatius_hard_negative_v1_hard_negative_splats.npz `
+  --gate-path evaluations/ignatius_hard_negative_v1_hard_negative_calibrated_gate_0p05.npz `
+  --method-name ignatius_confidence_filter_v1 `
+  --gate-thresholds 0.25 0.5 0.75 `
+  --thresholds 0.02 0.05 0.1 `
+  --render-max-frames 2
+```
+
+This writes filtered splat files for every `gate >= threshold` variant, a `gate_scaled` variant with optical thickness multiplied by
+calibrated confidence, per-variant geometry metrics, optional render metrics, and one compact comparison report.
+
 Run a harder mixed-candidate calibration workflow with generated off-surface splat candidates:
 
 ```powershell
@@ -360,6 +376,7 @@ python -m build
 - GPIS field score diagnostics for testing whether posterior mean, uncertainty, distance, or combined scores rank splat geometry error better than the current gate
 - GPIS-derived splat confidence calibration with downstream gate NPZ exports, current-score baselines, isotonic calibration, and logistic feature models
 - Hard-negative real-splat workflow that generates off-surface candidates, scores them with GPIS, and calibrates confidence on mixed source/negative sets
+- Calibrated splat filtering workflow that writes compacted/tau-scaled splat variants and compares geometry plus render metrics
 - Real GPIS gate model sweeps over pseudo-SDF construction modes, GPIS hyperparameters, epsilon, and gate floors
 - Metrics: RMSE, IoU, NLL, Brier score, ECE, and PSNR for rendered images
 - Unit and regression tests
