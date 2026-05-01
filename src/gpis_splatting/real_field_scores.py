@@ -55,7 +55,7 @@ def run_tanks_temples_gpis_field_score_diagnostics(
         distance_chunk_size=distance_chunk_size,
     )
     scene_root = Path(scene_dir)
-    resolved_model = resolve_scene_file(scene_root, model_path, "real_gpis_model.npz")
+    resolved_model = resolve_scene_file(scene_root, model_path, "real_gpis_model.npz").resolve()
     inputs = prepare_gate_diagnostic_inputs(
         scene_dir=scene_root,
         splats_path=splats_path,
