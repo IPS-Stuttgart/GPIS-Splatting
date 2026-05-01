@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 
 from gpis_splatting.real_calibrated_confidence import (
     format_calibrated_confidence_report,
+    resolve_existing_artifact_path,
     select_best_calibrator,
     select_best_filtering_variant,
     select_calibrated_gate_path,
@@ -15,6 +18,30 @@ def test_select_calibrated_gate_path_uses_threshold_label() -> None:
     status = {"calibrated_gate_paths": {"0p05": "evaluations/gate_0p05.npz", "0p1": "evaluations/gate_0p1.npz"}}
 
     assert str(select_calibrated_gate_path(status, calibration_threshold=0.05)).endswith("gate_0p05.npz")
+
+
+def test_resolve_existing_artifact_path_handles_scene_prefixed_relative_paths(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    scene_root = Path("real_scenes") / "ignatius_tnt64"
+    gate_path = scene_root / "evaluations" / "gate_0p05.npz"
+    gate_path.parent.mkdir(parents=True)
+    gate_path.write_bytes(b"placeholder")
+
+    resolved = resolve_existing_artifact_path(scene_root, gate_path)
+
+    assert resolved == gate_path.resolve()
+
+
+def test_resolve_existing_artifact_path_handles_scene_relative_paths(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    scene_root = Path("real_scenes") / "ignatius_tnt64"
+    gate_path = scene_root / "evaluations" / "gate_0p05.npz"
+    gate_path.parent.mkdir(parents=True)
+    gate_path.write_bytes(b"placeholder")
+
+    resolved = resolve_existing_artifact_path(scene_root, Path("evaluations") / "gate_0p05.npz")
+
+    assert resolved == gate_path.resolve()
 
 
 def test_select_best_calibrator_for_threshold() -> None:

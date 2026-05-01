@@ -75,7 +75,10 @@ def run_tanks_temples_calibrated_confidence(
         batch_size=batch_size,
         distance_chunk_size=distance_chunk_size,
     )
-    calibrated_gate = select_calibrated_gate_path(hard_negative["status"], calibration_threshold=calibration_threshold)
+    calibrated_gate = resolve_existing_artifact_path(
+        scene_root,
+        select_calibrated_gate_path(hard_negative["status"], calibration_threshold=calibration_threshold),
+    )
 
     filtering_method = f"{method_name}_filtering"
     filtering = run_tanks_temples_calibrated_splat_filtering(
@@ -159,6 +162,29 @@ def select_calibrated_gate_path(status: dict[str, Any], *, calibration_threshold
         return Path(gate_paths[str(calibration_threshold)])
     available = ", ".join(sorted(gate_paths)) or "none"
     raise FileNotFoundError(f"No calibrated gate for threshold {calibration_threshold:g}. Available calibrated gates: {available}.")
+
+
+def resolve_existing_artifact_path(scene_root: str | Path, path: str | Path) -> Path:
+    """Resolve artifact paths returned by nested workflows without double-prefixing scene_root.
+
+    Some workflow status dictionaries store paths relative to the repository root, for example
+    ``real_scenes/scene/evaluations/gate.npz``. Downstream helpers also accept paths relative to the
+    scene directory, such as ``evaluations/gate.npz``. Returning an absolute existing path prevents
+    downstream scene-file resolvers from prepending ``scene_root`` a second time.
+    """
+    resolved = Path(path)
+    if resolved.is_absolute():
+        return resolved
+
+    cwd_candidate = resolved.resolve()
+    if cwd_candidate.exists():
+        return cwd_candidate
+
+    scene_candidate = (Path(scene_root) / resolved).resolve()
+    if scene_candidate.exists():
+        return scene_candidate
+
+    return scene_candidate
 
 
 def select_best_calibrator(status: dict[str, Any], *, calibration_threshold: float) -> dict[str, Any] | None:
