@@ -12,7 +12,9 @@ on: # yamllint disable-line rule:truthy
       - "requirements-dev.txt"
       - "pyproject.toml"
       - "README.md"
+      - "docs/**"
       - ".github/workflows/gpis-splatting-ci.yml"
+      - ".github/workflows/calibrated-confidence.yml"
   pull_request:
     branches:
       - main
@@ -23,7 +25,9 @@ on: # yamllint disable-line rule:truthy
       - "requirements-dev.txt"
       - "pyproject.toml"
       - "README.md"
+      - "docs/**"
       - ".github/workflows/gpis-splatting-ci.yml"
+      - ".github/workflows/calibrated-confidence.yml"
   workflow_dispatch:
 
 permissions:
@@ -202,6 +206,8 @@ jobs:
           diagnose_tanks_temples_gpis_field_scores --help > /dev/null
           calibrate_gpis_splat_scores --help > /dev/null
           run_tanks_temples_hard_negative_calibration --help > /dev/null
+          run_tanks_temples_calibrated_splat_filtering --help > /dev/null
+          run_tanks_temples_calibrated_confidence --help > /dev/null
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v7
