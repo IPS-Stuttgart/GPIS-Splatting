@@ -1,0 +1,213 @@
+---
+name: Calibrated GPIS Confidence Evidence
+
+on: # yamllint disable-line rule:truthy
+  workflow_dispatch:
+    inputs:
+      scene:
+        description: Tanks and Temples scene to download and evaluate.
+        required: true
+        type: choice
+        default: Ignatius
+        options:
+          - Ignatius
+      prepared_scene:
+        description: Name of the prepared scene directory under real_scenes/.
+        required: true
+        type: string
+        default: ignatius_tnt64
+      max_images:
+        description: Maximum number of images to extract. Use 0 to extract all images and match the existing full Ignatius cache.
+        required: true
+        type: number
+        default: 0
+      train_view_count:
+        description: Number of train views in the prepared split.
+        required: true
+        type: number
+        default: 12
+      max_points:
+        description: Maximum sparse points/splats used for the bootstrap.
+        required: true
+        type: number
+        default: 10000
+      splat_sigma:
+        description: Initial world-space splat sigma.
+        required: true
+        type: string
+        default: "0.04"
+      max_train_points:
+        description: Dense GPIS training-point cap.
+        required: true
+        type: number
+        default: 1200
+      max_pred_points:
+        description: Geometry-evaluation prediction-point cap. Use 0 for all.
+        required: true
+        type: number
+        default: 50000
+      max_gt_points:
+        description: Geometry-evaluation ground-truth-point cap. Use 0 for all.
+        required: true
+        type: number
+        default: 50000
+      thresholds:
+        description: Space-separated geometry thresholds.
+        required: true
+        type: string
+        default: "0.02 0.05 0.1"
+      gate_thresholds:
+        description: Space-separated calibrated-confidence thresholds for filtering.
+        required: true
+        type: string
+        default: "0.1 0.25 0.5 0.75"
+      calibration_threshold:
+        description: Geometry threshold whose calibrated gate is used as the primary confidence signal.
+        required: true
+        type: string
+        default: "0.05"
+      render_max_frames:
+        description: Number of held-out frames to render for each calibrated filtering variant. Use 0 to skip rendering.
+        required: true
+        type: number
+        default: 4
+      cache_version:
+        description: Bump this to invalidate the downloaded-data cache.
+        required: true
+        type: string
+        default: v1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calibrated-confidence-${{ github.ref }}-${{ inputs.prepared_scene }}
+  cancel-in-progress: false
+
+jobs:
+  calibrated-confidence:
+    name: Cached calibrated-confidence evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      TNT_SCENE: ${{ inputs.scene }}
+      PREPARED_SCENE: ${{ inputs.prepared_scene }}
+      DOWNLOAD_ROOT: real_scenes/_downloads
+      OUTPUT_PREFIX: calibrated_confidence
+      METHOD_NAME: calibrated_confidence
+      MAX_IMAGES: ${{ inputs.max_images }}
+      TRAIN_VIEW_COUNT: ${{ inputs.train_view_count }}
+      MAX_POINTS: ${{ inputs.max_points }}
+      SPLAT_SIGMA: ${{ inputs.splat_sigma }}
+      MAX_TRAIN_POINTS: ${{ inputs.max_train_points }}
+      MAX_PRED_POINTS: ${{ inputs.max_pred_points }}
+      MAX_GT_POINTS: ${{ inputs.max_gt_points }}
+      THRESHOLDS: ${{ inputs.thresholds }}
+      GATE_THRESHOLDS: ${{ inputs.gate_thresholds }}
+      CALIBRATION_THRESHOLD: ${{ inputs.calibration_threshold }}
+      RENDER_MAX_FRAMES: ${{ inputs.render_max_frames }}
+      DATA_CACHE_VERSION: ${{ inputs.cache_version }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            pyproject.toml
+
+      - name: Restore cached Tanks and Temples assets
+        id: tnt-cache
+        uses: actions/cache@v4
+        with:
+          path: real_scenes/_downloads/tanks_temples/${{ env.TNT_SCENE }}
+          key: tnt-${{ runner.os }}-${{ env.TNT_SCENE }}-images${{ env.MAX_IMAGES }}-${{ env.DATA_CACHE_VERSION }}
+          restore-keys: |
+            tnt-${{ runner.os }}-${{ env.TNT_SCENE }}-images
+            tnt-${{ runner.os }}-${{ env.TNT_SCENE }}-
+
+      - name: Install package and dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -e .
+
+      - name: Download cached Tanks and Temples data
+        run: |
+          echo "Tanks and Temples cache hit: ${{ steps.tnt-cache.outputs.cache-hit }}" >> "${GITHUB_STEP_SUMMARY}"
+          python -m gpis_splatting.cli.download_tanks_temples_scene \
+            --scene "${TNT_SCENE}" \
+            --output-root "${DOWNLOAD_ROOT}" \
+            --max-images "${MAX_IMAGES}"
+
+      - name: Prepare normalized real scene
+        run: |
+          python -m gpis_splatting.cli.prepare_tanks_temples_scene \
+            --input-dir "${DOWNLOAD_ROOT}/tanks_temples/${TNT_SCENE}" \
+            --scene "${TNT_SCENE}" \
+            --prepared-scene "${PREPARED_SCENE}" \
+            --train-view-count "${TRAIN_VIEW_COUNT}"
+          python -m gpis_splatting.cli.validate_real_scene --scene "${PREPARED_SCENE}"
+
+      - name: Bootstrap and fit GPIS
+        run: |
+          python -m gpis_splatting.cli.bootstrap_real_gpis \
+            --scene "${PREPARED_SCENE}" \
+            --output-prefix "${OUTPUT_PREFIX}" \
+            --point-source auto \
+            --max-points "${MAX_POINTS}" \
+            --splat-sigma "${SPLAT_SIGMA}"
+          python -m gpis_splatting.cli.fit_real_gpis \
+            --scene "${PREPARED_SCENE}" \
+            --samples-path "${OUTPUT_PREFIX}_samples.npz" \
+            --output-model "${OUTPUT_PREFIX}_gpis_model.npz" \
+            --max-train-points "${MAX_TRAIN_POINTS}"
+
+      - name: Run calibrated-confidence evidence path
+        run: |
+          read -r -a THRESHOLD_ARGS <<< "${THRESHOLDS}"
+          read -r -a GATE_THRESHOLD_ARGS <<< "${GATE_THRESHOLDS}"
+          python -m gpis_splatting.cli.run_tanks_temples_calibrated_confidence \
+            --scene "${PREPARED_SCENE}" \
+            --splats-path "${OUTPUT_PREFIX}_splats.npz" \
+            --model-path "${OUTPUT_PREFIX}_gpis_model.npz" \
+            --method-name "${METHOD_NAME}" \
+            --calibration-threshold "${CALIBRATION_THRESHOLD}" \
+            --thresholds "${THRESHOLD_ARGS[@]}" \
+            --gate-thresholds "${GATE_THRESHOLD_ARGS[@]}" \
+            --max-source-splats "${MAX_PRED_POINTS}" \
+            --max-pred-points "${MAX_PRED_POINTS}" \
+            --max-gt-points "${MAX_GT_POINTS}" \
+            --render-max-frames "${RENDER_MAX_FRAMES}"
+
+      - name: Publish calibrated-confidence summary
+        if: always()
+        run: |
+          REPORT="real_scenes/${PREPARED_SCENE}/evaluations/${METHOD_NAME}_calibrated_confidence_report.md"
+          if [ -f "${REPORT}" ]; then
+            cat "${REPORT}" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Upload calibrated-confidence artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: calibrated-confidence-${{ env.PREPARED_SCENE }}
+          path: |
+            real_scenes/${{ env.PREPARED_SCENE }}/*_bootstrap_report.json
+            real_scenes/${{ env.PREPARED_SCENE }}/*_fit_report.json
+            real_scenes/${{ env.PREPARED_SCENE }}/real_scene.json
+            real_scenes/${{ env.PREPARED_SCENE }}/cameras.json
+            real_scenes/${{ env.PREPARED_SCENE }}/splits.json
+            real_scenes/${{ env.PREPARED_SCENE }}/validation.json
+            real_scenes/${{ env.PREPARED_SCENE }}/evaluations/**/*.csv
+            real_scenes/${{ env.PREPARED_SCENE }}/evaluations/**/*.json
+            real_scenes/${{ env.PREPARED_SCENE }}/evaluations/**/*.md
+            real_scenes/${{ env.PREPARED_SCENE }}/evaluations/**/*.npz
+            real_scenes/${{ env.PREPARED_SCENE }}/renders/**/real_render_report.json
+            real_scenes/${{ env.PREPARED_SCENE }}/renders/**/*.png
