@@ -33,6 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gate-floor", type=float, default=0.0)
     parser.add_argument("--batch-size", type=int, default=4096)
     parser.add_argument("--distance-chunk-size", type=int, default=256)
+    parser.add_argument("--include-random-baselines", type=str_to_bool, default=False)
+    parser.add_argument("--random-baseline-seeds", type=int, nargs="+", default=[0, 1, 2])
     parser.add_argument("--render-split", default="test")
     parser.add_argument("--render-max-frames", type=int, default=0, help="Use 0 to skip rendering.")
     parser.add_argument("--evaluate-render-metrics", type=str_to_bool, default=True)
@@ -68,6 +70,8 @@ def main(argv: list[str] | None = None) -> None:
         gate_floor=args.gate_floor,
         batch_size=args.batch_size,
         distance_chunk_size=args.distance_chunk_size,
+        include_random_baselines=args.include_random_baselines,
+        random_baseline_seeds=tuple(args.random_baseline_seeds),
         render_split=args.render_split,
         render_max_frames=args.render_max_frames,
         evaluate_render_metrics=args.evaluate_render_metrics,
