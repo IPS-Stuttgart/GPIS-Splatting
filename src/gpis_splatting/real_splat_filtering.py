@@ -26,6 +26,7 @@ class SplatFilterVariant:
     gate_threshold: float | None
     tau_scaled: bool
     gates: np.ndarray
+    random_seed: int | None = None
 
 
 def run_tanks_temples_calibrated_splat_filtering(
@@ -39,6 +40,8 @@ def run_tanks_temples_calibrated_splat_filtering(
     include_baseline: bool = True,
     write_scaled: bool = True,
     write_filtered: bool = True,
+    include_random_baselines: bool = False,
+    random_baseline_seeds: tuple[int, ...] = (0, 1, 2),
     tau_scale_floor: float = 0.0,
     ground_truth_path: str | Path | None = None,
     alignment_path: str | Path | None = None,
@@ -61,6 +64,8 @@ def run_tanks_temples_calibrated_splat_filtering(
         include_baseline=include_baseline,
         write_scaled=write_scaled,
         write_filtered=write_filtered,
+        include_random_baselines=include_random_baselines,
+        random_baseline_seeds=random_baseline_seeds,
         tau_scale_floor=tau_scale_floor,
         render_max_frames=render_max_frames,
     )
@@ -85,6 +90,8 @@ def run_tanks_temples_calibrated_splat_filtering(
         include_baseline=include_baseline,
         write_scaled=write_scaled,
         write_filtered=write_filtered,
+        include_random_baselines=include_random_baselines,
+        random_baseline_seeds=random_baseline_seeds,
         tau_scale_floor=tau_scale_floor,
     )
 
@@ -150,6 +157,7 @@ def run_tanks_temples_calibrated_splat_filtering(
                     "retention_fraction": variant.retention_fraction,
                     "gate_threshold": variant.gate_threshold,
                     "tau_scaled": variant.tau_scaled,
+                    "random_seed": variant.random_seed,
                     "gate_min": float(variant.gates.min()) if variant.gates.size else None,
                     "gate_max": float(variant.gates.max()) if variant.gates.size else None,
                     "gate_mean": float(variant.gates.mean()) if variant.gates.size else None,
@@ -175,6 +183,7 @@ def run_tanks_temples_calibrated_splat_filtering(
                 "retention_fraction": variant.retention_fraction,
                 "gate_threshold": variant.gate_threshold,
                 "tau_scaled": variant.tau_scaled,
+                "random_seed": variant.random_seed,
                 "geometry_summary_path": str(geometry_result["summary_path"]),
                 "geometry_threshold_metrics_path": str(geometry_result["threshold_metrics_path"]),
                 "render_status": render_status,
@@ -197,6 +206,8 @@ def run_tanks_temples_calibrated_splat_filtering(
         "include_baseline": include_baseline,
         "write_scaled": write_scaled,
         "write_filtered": write_filtered,
+        "include_random_baselines": include_random_baselines,
+        "random_baseline_seeds": list(random_baseline_seeds),
         "tau_scale_floor": tau_scale_floor,
         "render_split": render_split,
         "render_max_frames": render_max_frames,
@@ -228,6 +239,8 @@ def build_filter_variants(
     include_baseline: bool,
     write_scaled: bool,
     write_filtered: bool,
+    include_random_baselines: bool,
+    random_baseline_seeds: tuple[int, ...],
     tau_scale_floor: float,
 ) -> list[SplatFilterVariant]:
     variants = []
@@ -284,6 +297,58 @@ def build_filter_variants(
                     tau_scale_floor=tau_scale_floor,
                 )
             )
+            if include_random_baselines:
+                variants.extend(
+                    save_random_same_retention_variants(
+                        splats=splats,
+                        gates=gates,
+                        retained_count=int(mask.sum()),
+                        out_dir=out_dir,
+                        method_name=method_name,
+                        source_gate_path=gate_path,
+                        gate_threshold=threshold,
+                        threshold_label=label,
+                        random_baseline_seeds=random_baseline_seeds,
+                    )
+                )
+    return variants
+
+
+def save_random_same_retention_variants(
+    *,
+    splats: SplatCloud,
+    gates: np.ndarray,
+    retained_count: int,
+    out_dir: Path,
+    method_name: str,
+    source_gate_path: Path,
+    gate_threshold: float,
+    threshold_label: str,
+    random_baseline_seeds: tuple[int, ...],
+) -> list[SplatFilterVariant]:
+    splat_count = int(gates.shape[0])
+    variants = []
+    for random_seed in random_baseline_seeds:
+        rng = np.random.default_rng(random_seed)
+        selected = rng.choice(splat_count, size=retained_count, replace=False)
+        mask = np.zeros((splat_count,), dtype=bool)
+        mask[selected] = True
+        variants.append(
+            save_splat_filter_variant(
+                splats=splats,
+                gates=gates,
+                mask=mask,
+                out_dir=out_dir,
+                method_name=method_name,
+                name=f"random_same_retention_{threshold_label}_seed{random_seed}",
+                kind="random_same_retention",
+                source_gate_path=source_gate_path,
+                gate_threshold=gate_threshold,
+                tau_scaled=False,
+                tau_scale_floor=0.0,
+                random_seed=random_seed,
+            )
+        )
     return variants
 
 
@@ -300,6 +365,7 @@ def save_splat_filter_variant(
     gate_threshold: float | None,
     tau_scaled: bool,
     tau_scale_floor: float,
+    random_seed: int | None = None,
 ) -> SplatFilterVariant:
     selected = np.flatnonzero(mask).astype(np.int64)
     selected_gates = gates[selected]
@@ -328,6 +394,7 @@ def save_splat_filter_variant(
         gate_threshold=np.asarray(np.nan if gate_threshold is None else float(gate_threshold), dtype=np.float64),
         tau_scaled=np.asarray(bool(tau_scaled)),
         tau_scale_floor=np.asarray(float(tau_scale_floor), dtype=np.float64),
+        random_seed=np.asarray(-1 if random_seed is None else int(random_seed), dtype=np.int64),
     )
     return SplatFilterVariant(
         name=name,
@@ -339,6 +406,7 @@ def save_splat_filter_variant(
         gate_threshold=gate_threshold,
         tau_scaled=tau_scaled,
         gates=selected_gates,
+        random_seed=random_seed,
     )
 
 
@@ -361,6 +429,8 @@ def validate_filtering_config(
     include_baseline: bool,
     write_scaled: bool,
     write_filtered: bool,
+    include_random_baselines: bool,
+    random_baseline_seeds: tuple[int, ...],
     tau_scale_floor: float,
     render_max_frames: int,
 ) -> None:
@@ -368,6 +438,10 @@ def validate_filtering_config(
         raise ValueError("Enable at least one of baseline, scaled, or filtered variants.")
     if any(not 0.0 <= threshold <= 1.0 for threshold in gate_thresholds):
         raise ValueError("gate_thresholds must be in [0, 1].")
+    if include_random_baselines and not write_filtered:
+        raise ValueError("Random same-retention baselines require filtered gate-threshold variants.")
+    if include_random_baselines and not random_baseline_seeds:
+        raise ValueError("At least one random_baseline_seed is required when random baselines are enabled.")
     if not 0.0 <= tau_scale_floor <= 1.0:
         raise ValueError("tau_scale_floor must be in [0, 1].")
     if render_max_frames < 0:
@@ -382,6 +456,7 @@ def format_filtering_report(status: dict[str, Any], comparison: pd.DataFrame) ->
         f"- Input splats: `{status['input_splats_path']}`",
         f"- Input gate: `{status['input_gate_path']}`",
         f"- Variants evaluated: `{status['variant_count']}`",
+        f"- Random same-retention baselines: `{status.get('include_random_baselines', False)}`",
         f"- Comparison CSV: `{status['comparison_path']}`",
     ]
     if not comparison.empty:
@@ -390,16 +465,16 @@ def format_filtering_report(status: dict[str, Any], comparison: pd.DataFrame) ->
 
 
 def format_comparison_table(comparison: pd.DataFrame) -> str:
-    columns = ["variant", "geometry_threshold", "retained_count", "retention_fraction", "precision", "recall", "f_score", "chamfer_l1", "mean_psnr"]
+    columns = ["variant", "variant_kind", "geometry_threshold", "retained_count", "retention_fraction", "precision", "recall", "f_score", "chamfer_l1", "mean_psnr"]
     table = comparison[columns].copy()
     lines = [
-        "| variant | threshold | retained | retention | precision | recall | f_score | chamfer_l1 | psnr |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| variant | kind | threshold | retained | retention | precision | recall | f_score | chamfer_l1 | psnr |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in table.itertuples(index=False):
         psnr = "n/a" if pd.isna(row.mean_psnr) else f"{row.mean_psnr:.6g}"
         lines.append(
-            f"| `{row.variant}` | {row.geometry_threshold:.6g} | {row.retained_count} | {row.retention_fraction:.6g} | "
+            f"| `{row.variant}` | `{row.variant_kind}` | {row.geometry_threshold:.6g} | {row.retained_count} | {row.retention_fraction:.6g} | "
             f"{row.precision:.6g} | {row.recall:.6g} | {row.f_score:.6g} | {row.chamfer_l1:.6g} | {psnr} |"
         )
     return "\n".join(lines)
