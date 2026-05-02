@@ -20,6 +20,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-baseline", type=str_to_bool, default=True)
     parser.add_argument("--write-scaled", type=str_to_bool, default=True)
     parser.add_argument("--write-filtered", type=str_to_bool, default=True)
+    parser.add_argument("--include-random-baselines", type=str_to_bool, default=False)
+    parser.add_argument("--random-baseline-seeds", type=int, nargs="+", default=[0, 1, 2])
     parser.add_argument("--tau-scale-floor", type=float, default=0.0)
     parser.add_argument("--ground-truth-path", default=None, help="Defaults to the Tanks and Temples path stored in real_scene.json.")
     parser.add_argument("--alignment-path", default=None, help="Defaults to the Tanks and Temples alignment path stored in real_scene.json.")
@@ -54,6 +56,8 @@ def main(argv: list[str] | None = None) -> None:
         include_baseline=args.include_baseline,
         write_scaled=args.write_scaled,
         write_filtered=args.write_filtered,
+        include_random_baselines=args.include_random_baselines,
+        random_baseline_seeds=tuple(args.random_baseline_seeds),
         tau_scale_floor=args.tau_scale_floor,
         ground_truth_path=args.ground_truth_path,
         alignment_path=args.alignment_path,
