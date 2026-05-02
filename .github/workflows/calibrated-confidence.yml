@@ -66,11 +66,21 @@ on: # yamllint disable-line rule:truthy
         required: true
         type: string
         default: "0.05"
+      include_random_baselines:
+        description: Add random same-retention controls for each confidence-threshold variant.
+        required: true
+        type: boolean
+        default: true
+      random_baseline_seeds:
+        description: Space-separated random seeds for same-retention controls.
+        required: true
+        type: string
+        default: "0 1 2"
       render_max_frames:
         description: Number of held-out frames to render for each calibrated filtering variant. Use 0 to skip rendering.
         required: true
         type: number
-        default: 4
+        default: 0
       cache_version:
         description: Bump this to invalidate the downloaded-data cache.
         required: true
@@ -105,6 +115,8 @@ jobs:
       THRESHOLDS: ${{ inputs.thresholds }}
       GATE_THRESHOLDS: ${{ inputs.gate_thresholds }}
       CALIBRATION_THRESHOLD: ${{ inputs.calibration_threshold }}
+      INCLUDE_RANDOM_BASELINES: ${{ inputs.include_random_baselines }}
+      RANDOM_BASELINE_SEEDS: ${{ inputs.random_baseline_seeds }}
       RENDER_MAX_FRAMES: ${{ inputs.render_max_frames }}
       DATA_CACHE_VERSION: ${{ inputs.cache_version }}
 
@@ -172,6 +184,7 @@ jobs:
         run: |
           read -r -a THRESHOLD_ARGS <<< "${THRESHOLDS}"
           read -r -a GATE_THRESHOLD_ARGS <<< "${GATE_THRESHOLDS}"
+          read -r -a RANDOM_SEED_ARGS <<< "${RANDOM_BASELINE_SEEDS}"
           python -m gpis_splatting.cli.run_tanks_temples_calibrated_confidence \
             --scene "${PREPARED_SCENE}" \
             --splats-path "${OUTPUT_PREFIX}_splats.npz" \
@@ -183,6 +196,8 @@ jobs:
             --max-source-splats "${MAX_PRED_POINTS}" \
             --max-pred-points "${MAX_PRED_POINTS}" \
             --max-gt-points "${MAX_GT_POINTS}" \
+            --include-random-baselines "${INCLUDE_RANDOM_BASELINES}" \
+            --random-baseline-seeds "${RANDOM_SEED_ARGS[@]}" \
             --render-max-frames "${RENDER_MAX_FRAMES}"
 
       - name: Publish calibrated-confidence summary
