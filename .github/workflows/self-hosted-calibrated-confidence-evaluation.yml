@@ -1,0 +1,426 @@
+---
+name: Self-hosted Calibrated Confidence Evaluation
+
+on: # yamllint disable-line rule:truthy
+  workflow_dispatch:
+    inputs:
+      runner_labels_json:
+        description: JSON array of self-hosted runner labels. Use a trusted manual-only runner.
+        required: true
+        type: string
+        default: '["self-hosted", "linux", "x64"]'
+      scenes_json:
+        description: JSON array of Tanks and Temples scenes. The current code supports Ignatius; extend tanks_temples.py before adding more scenes.
+        required: true
+        type: string
+        default: '["Ignatius"]'
+      max_images:
+        description: Maximum number of images to extract. Use 0 for all images and the full-scene cache.
+        required: true
+        type: number
+        default: 0
+      train_view_count:
+        description: Number of train views in the prepared sparse split.
+        required: true
+        type: number
+        default: 12
+      max_points:
+        description: Maximum sparse points/splats used for the bootstrap.
+        required: true
+        type: number
+        default: 25000
+      splat_sigma:
+        description: Initial world-space splat sigma.
+        required: true
+        type: string
+        default: "0.04"
+      max_train_points:
+        description: Dense GPIS training-point cap. Raise cautiously; dense GPIS memory/time can grow quickly.
+        required: true
+        type: number
+        default: 2500
+      max_pred_points:
+        description: Geometry-evaluation prediction-point cap. Use 0 for all.
+        required: true
+        type: number
+        default: 150000
+      max_gt_points:
+        description: Geometry-evaluation ground-truth-point cap. Use 0 for all.
+        required: true
+        type: number
+        default: 150000
+      thresholds:
+        description: Space-separated geometry thresholds.
+        required: true
+        type: string
+        default: "0.02 0.05 0.1"
+      gate_thresholds:
+        description: Space-separated calibrated-confidence thresholds for filtering.
+        required: true
+        type: string
+        default: "0.1 0.25 0.5 0.75"
+      calibration_threshold:
+        description: Geometry threshold whose calibrated gate is used as the primary confidence signal.
+        required: true
+        type: string
+        default: "0.05"
+      random_baseline_seeds:
+        description: Space-separated random seeds for same-retention controls.
+        required: true
+        type: string
+        default: "0 1 2 3 4 5 6 7 8 9"
+      render_max_frames:
+        description: Number of held-out frames to render per filtering variant. Use 0 for geometry-only paper evaluation.
+        required: true
+        type: number
+        default: 0
+      cache_version:
+        description: Bump this to invalidate the downloaded-data cache.
+        required: true
+        type: string
+        default: v1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-hosted-calibrated-confidence-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  self-hosted-evaluation:
+    name: ${{ matrix.scene }} calibrated-confidence large evaluation
+    runs-on: ${{ fromJSON(inputs.runner_labels_json) }}
+    timeout-minutes: 1440
+    strategy:
+      fail-fast: false
+      matrix:
+        scene: ${{ fromJSON(inputs.scenes_json) }}
+
+    env:
+      TNT_SCENE: ${{ matrix.scene }}
+      DOWNLOAD_ROOT: real_scenes/_downloads
+      OUTPUT_PREFIX: selfhosted_calibrated_confidence
+      METHOD_NAME: selfhosted_calibrated_confidence
+      MAX_IMAGES: ${{ inputs.max_images }}
+      TRAIN_VIEW_COUNT: ${{ inputs.train_view_count }}
+      MAX_POINTS: ${{ inputs.max_points }}
+      SPLAT_SIGMA: ${{ inputs.splat_sigma }}
+      MAX_TRAIN_POINTS: ${{ inputs.max_train_points }}
+      MAX_PRED_POINTS: ${{ inputs.max_pred_points }}
+      MAX_GT_POINTS: ${{ inputs.max_gt_points }}
+      THRESHOLDS: ${{ inputs.thresholds }}
+      GATE_THRESHOLDS: ${{ inputs.gate_thresholds }}
+      CALIBRATION_THRESHOLD: ${{ inputs.calibration_threshold }}
+      RANDOM_BASELINE_SEEDS: ${{ inputs.random_baseline_seeds }}
+      RENDER_MAX_FRAMES: ${{ inputs.render_max_frames }}
+      DATA_CACHE_VERSION: ${{ inputs.cache_version }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Derive scene-specific names
+        shell: bash
+        run: |
+          python - <<'PY' >> "${GITHUB_ENV}"
+          import os
+          import re
+          scene = os.environ["TNT_SCENE"]
+          slug = re.sub(r"[^0-9A-Za-z]+", "_", scene).strip("_").lower()
+          suffix = f"m{os.environ['MAX_POINTS']}_t{os.environ['MAX_TRAIN_POINTS']}_s{os.environ['TRAIN_VIEW_COUNT']}"
+          print(f"SCENE_SLUG={slug}")
+          print(f"PREPARED_SCENE={slug}_selfhosted_{suffix}")
+          PY
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            pyproject.toml
+
+      - name: Restore cached Tanks and Temples assets
+        id: tnt-cache
+        uses: actions/cache@v4
+        with:
+          path: real_scenes/_downloads/tanks_temples/${{ env.TNT_SCENE }}
+          key: tnt-${{ runner.os }}-${{ runner.arch }}-${{ env.TNT_SCENE }}-images${{ env.MAX_IMAGES }}-${{ env.DATA_CACHE_VERSION }}
+          restore-keys: |
+            tnt-${{ runner.os }}-${{ runner.arch }}-${{ env.TNT_SCENE }}-images
+            tnt-${{ runner.os }}-${{ runner.arch }}-${{ env.TNT_SCENE }}-
+            tnt-${{ runner.os }}-${{ env.TNT_SCENE }}-
+
+      - name: Install package and dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -e .
+
+      - name: Verify requested scene is supported
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+          from gpis_splatting.tanks_temples import SUPPORTED_TANKS_TEMPLES_SCENES
+          scene = os.environ["TNT_SCENE"]
+          if scene not in SUPPORTED_TANKS_TEMPLES_SCENES:
+              supported = ", ".join(SUPPORTED_TANKS_TEMPLES_SCENES)
+              print(f"Unsupported scene {scene!r}. Current supported scenes: {supported}.", file=sys.stderr)
+              print("Extend gpis_splatting.tanks_temples before adding this scene to the self-hosted matrix.", file=sys.stderr)
+              raise SystemExit(2)
+          PY
+
+      - name: Download cached Tanks and Temples data
+        run: |
+          echo "## ${TNT_SCENE} self-hosted evaluation" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Tanks and Temples cache hit: ${{ steps.tnt-cache.outputs.cache-hit }}" >> "${GITHUB_STEP_SUMMARY}"
+          python -m gpis_splatting.cli.download_tanks_temples_scene \
+            --scene "${TNT_SCENE}" \
+            --output-root "${DOWNLOAD_ROOT}" \
+            --max-images "${MAX_IMAGES}"
+
+      - name: Prepare normalized real scene
+        run: |
+          python -m gpis_splatting.cli.prepare_tanks_temples_scene \
+            --input-dir "${DOWNLOAD_ROOT}/tanks_temples/${TNT_SCENE}" \
+            --scene "${TNT_SCENE}" \
+            --prepared-scene "${PREPARED_SCENE}" \
+            --train-view-count "${TRAIN_VIEW_COUNT}"
+          python -m gpis_splatting.cli.validate_real_scene --scene "${PREPARED_SCENE}"
+
+      - name: Bootstrap and fit GPIS
+        run: |
+          python -m gpis_splatting.cli.bootstrap_real_gpis \
+            --scene "${PREPARED_SCENE}" \
+            --output-prefix "${OUTPUT_PREFIX}" \
+            --point-source auto \
+            --max-points "${MAX_POINTS}" \
+            --splat-sigma "${SPLAT_SIGMA}"
+          python -m gpis_splatting.cli.fit_real_gpis \
+            --scene "${PREPARED_SCENE}" \
+            --samples-path "${OUTPUT_PREFIX}_samples.npz" \
+            --output-model "${OUTPUT_PREFIX}_gpis_model.npz" \
+            --max-train-points "${MAX_TRAIN_POINTS}"
+
+      - name: Run calibrated-confidence evidence path with random controls
+        run: |
+          read -r -a THRESHOLD_ARGS <<< "${THRESHOLDS}"
+          read -r -a GATE_THRESHOLD_ARGS <<< "${GATE_THRESHOLDS}"
+          read -r -a RANDOM_SEED_ARGS <<< "${RANDOM_BASELINE_SEEDS}"
+          python -m gpis_splatting.cli.run_tanks_temples_calibrated_confidence \
+            --scene "${PREPARED_SCENE}" \
+            --splats-path "${OUTPUT_PREFIX}_splats.npz" \
+            --model-path "${OUTPUT_PREFIX}_gpis_model.npz" \
+            --method-name "${METHOD_NAME}" \
+            --calibration-threshold "${CALIBRATION_THRESHOLD}" \
+            --thresholds "${THRESHOLD_ARGS[@]}" \
+            --gate-thresholds "${GATE_THRESHOLD_ARGS[@]}" \
+            --max-source-splats "${MAX_PRED_POINTS}" \
+            --max-pred-points "${MAX_PRED_POINTS}" \
+            --max-gt-points "${MAX_GT_POINTS}" \
+            --include-random-baselines true \
+            --random-baseline-seeds "${RANDOM_SEED_ARGS[@]}" \
+            --render-max-frames "${RENDER_MAX_FRAMES}"
+
+      - name: Extract paper-relevant key result
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import os
+          import re
+          from pathlib import Path
+
+          import pandas as pd
+
+          scene = os.environ["TNT_SCENE"]
+          prepared_scene = os.environ["PREPARED_SCENE"]
+          method = os.environ["METHOD_NAME"]
+          target_threshold = float(os.environ["CALIBRATION_THRESHOLD"])
+          eval_dir = Path("real_scenes") / prepared_scene / "evaluations"
+          comparison = eval_dir / f"{method}_filtering_splat_filtering_comparison.csv"
+          out_csv = eval_dir / f"{method}_paper_key_result.csv"
+          out_md = eval_dir / f"{method}_paper_key_result.md"
+
+          if not comparison.exists():
+              out_md.write_text(f"# {scene} key result\n\nFiltering comparison not found: `{comparison}`.\n", encoding="utf-8")
+              raise SystemExit(0)
+
+          df = pd.read_csv(comparison)
+          variant_col = next((col for col in ["variant", "method_variant", "filter_variant"] if col in df.columns), None)
+          threshold_col = next((col for col in ["geometry_threshold", "threshold"] if col in df.columns), None)
+          if variant_col is None or threshold_col is None:
+              out_md.write_text(
+                  f"# {scene} key result\n\nCould not identify variant/threshold columns in `{comparison}`. Columns: {list(df.columns)}\n",
+                  encoding="utf-8",
+              )
+              raise SystemExit(0)
+
+          subset = df[df[threshold_col].astype(float).sub(target_threshold).abs() < 1e-9].copy()
+          rows = []
+          for _, gate_row in subset[subset[variant_col].astype(str).str.startswith("gate_ge_")].iterrows():
+              variant = str(gate_row[variant_col])
+              match = re.search(r"gate_ge_(.+)$", variant)
+              if match is None:
+                  continue
+              gate = match.group(1)
+              random_prefix = f"random_same_retention_{gate}_seed"
+              random_rows = subset[subset[variant_col].astype(str).str.startswith(random_prefix)]
+              if random_rows.empty:
+                  continue
+              row = {
+                  "scene": scene,
+                  "prepared_scene": prepared_scene,
+                  "variant": variant,
+                  "geometry_threshold": target_threshold,
+              }
+              for metric in ["retention", "precision", "recall", "f_score", "chamfer_l1", "chamfer_l2"]:
+                  if metric not in subset.columns:
+                      continue
+                  row[metric] = float(gate_row[metric])
+                  row[f"random_{metric}_mean"] = float(random_rows[metric].mean())
+                  row[f"random_{metric}_std"] = float(random_rows[metric].std(ddof=0))
+                  row[f"delta_{metric}_vs_random_mean"] = row[metric] - row[f"random_{metric}_mean"]
+              rows.append(row)
+
+          result = pd.DataFrame(rows)
+          result.to_csv(out_csv, index=False)
+          if result.empty:
+              out_md.write_text(f"# {scene} key result\n\nNo gate/random same-retention pairs found at threshold {target_threshold}.\n", encoding="utf-8")
+          else:
+              best = result.sort_values("delta_f_score_vs_random_mean", ascending=False).iloc[0]
+              out_md.write_text(
+                  "\n".join(
+                      [
+                          f"# {scene} self-hosted calibrated-confidence key result",
+                          "",
+                          f"Prepared scene: `{prepared_scene}`",
+                          f"Geometry threshold: `{target_threshold}`",
+                          f"Best random-control delta variant: `{best['variant']}`",
+                          f"Retention: {best.get('retention', float('nan')):.6g}",
+                          f"F-score: {best.get('f_score', float('nan')):.6g}",
+                          f"Random mean F-score: {best.get('random_f_score_mean', float('nan')):.6g}",
+                          f"Delta F-score vs random mean: {best.get('delta_f_score_vs_random_mean', float('nan')):.6g}",
+                          f"Chamfer L1: {best.get('chamfer_l1', float('nan')):.6g}",
+                          f"Random mean Chamfer L1: {best.get('random_chamfer_l1_mean', float('nan')):.6g}",
+                          f"Delta Chamfer L1 vs random mean: {best.get('delta_chamfer_l1_vs_random_mean', float('nan')):.6g}",
+                          "",
+                          "Full comparison table is in the uploaded artifact.",
+                      ]
+                  )
+                  + "\n",
+                  encoding="utf-8",
+              )
+          print(out_md.read_text(encoding="utf-8"))
+          PY
+
+          REPORT="real_scenes/${PREPARED_SCENE}/evaluations/${METHOD_NAME}_calibrated_confidence_report.md"
+          KEY_REPORT="real_scenes/${PREPARED_SCENE}/evaluations/${METHOD_NAME}_paper_key_result.md"
+          if [ -f "${REPORT}" ]; then
+            cat "${REPORT}" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+          if [ -f "${KEY_REPORT}" ]; then
+            cat "${KEY_REPORT}" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Upload self-hosted evaluation artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: self-hosted-calibrated-${{ matrix.scene }}-m${{ env.MAX_POINTS }}-t${{ env.MAX_TRAIN_POINTS }}-s${{ env.TRAIN_VIEW_COUNT }}
+          path: |
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/*_bootstrap_report.json
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/*_fit_report.json
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/real_scene.json
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/cameras.json
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/splits.json
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/validation.json
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/evaluations/**/*.csv
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/evaluations/**/*.json
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/evaluations/**/*.md
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/evaluations/**/*.npz
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/renders/**/real_render_report.json
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/renders/**/*.png
+
+  combine-scene-summaries:
+    name: Combine self-hosted scene summaries
+    needs: self-hosted-evaluation
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download scene artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: self-hosted-calibrated-*
+          path: self_hosted_artifacts
+          merge-multiple: false
+
+      - name: Install summary dependencies
+        run: python -m pip install pandas tabulate
+
+      - name: Build combined summary
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+
+          root = Path("self_hosted_artifacts")
+          csvs = sorted(root.rglob("*_paper_key_result.csv"))
+          out_dir = Path("self_hosted_summary")
+          out_dir.mkdir(parents=True, exist_ok=True)
+          if not csvs:
+              (out_dir / "self_hosted_combined_summary.md").write_text(
+                  "# Self-hosted combined summary\n\nNo paper key-result CSV files were found.\n",
+                  encoding="utf-8",
+              )
+              pd.DataFrame().to_csv(out_dir / "self_hosted_combined_summary.csv", index=False)
+          else:
+              frames = [pd.read_csv(path) for path in csvs]
+              combined = pd.concat(frames, ignore_index=True)
+              combined.to_csv(out_dir / "self_hosted_combined_summary.csv", index=False)
+              positive = "delta_f_score_vs_random_mean" in combined.columns and (combined["delta_f_score_vs_random_mean"] > 0).all()
+              lines = [
+                  "# Self-hosted combined summary",
+                  "",
+                  f"Scene-result rows: {len(combined)}",
+                  f"All F-score deltas vs random mean positive: {positive}",
+                  "",
+              ]
+              if "delta_f_score_vs_random_mean" in combined.columns:
+                  display_cols = [
+                      col
+                      for col in [
+                          "scene",
+                          "variant",
+                          "retention",
+                          "f_score",
+                          "random_f_score_mean",
+                          "delta_f_score_vs_random_mean",
+                          "chamfer_l1",
+                          "random_chamfer_l1_mean",
+                          "delta_chamfer_l1_vs_random_mean",
+                      ]
+                      if col in combined.columns
+                  ]
+                  lines.append(combined[display_cols].to_markdown(index=False))
+                  lines.append("")
+              (out_dir / "self_hosted_combined_summary.md").write_text("\n".join(lines), encoding="utf-8")
+          print((out_dir / "self_hosted_combined_summary.md").read_text(encoding="utf-8"))
+          PY
+          cat self_hosted_summary/self_hosted_combined_summary.md >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload combined summary
+        uses: actions/upload-artifact@v7
+        with:
+          name: self-hosted-calibrated-combined-summary
+          path: self_hosted_summary/**
