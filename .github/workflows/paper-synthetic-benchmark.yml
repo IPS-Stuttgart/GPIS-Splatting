@@ -1,0 +1,204 @@
+---
+name: Paper Synthetic Benchmark
+
+on: # yamllint disable-line rule:truthy
+  workflow_dispatch:
+    inputs:
+      preset:
+        description: Synthetic evaluation preset.
+        required: true
+        type: choice
+        default: synthetic_quick
+        options:
+          - synthetic_ci
+          - synthetic_quick
+          - synthetic_full
+      seeds:
+        description: Space-separated seeds for repeated controlled synthetic runs.
+        required: true
+        type: string
+        default: "7 13 23"
+      experiment_prefix:
+        description: Prefix for experiment directories under evaluation_runs/.
+        required: true
+        type: string
+        default: paper_synthetic
+      no_fail_on_checks:
+        description: Keep producing paper artifacts even if diagnostic checks fail.
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paper-synthetic-${{ github.ref }}-${{ inputs.preset }}-${{ inputs.experiment_prefix }}
+  cancel-in-progress: false
+
+jobs:
+  synthetic-paper-benchmark:
+    name: Synthetic benchmark for paper evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      EVAL_PRESET: ${{ inputs.preset }}
+      EVAL_SEEDS: ${{ inputs.seeds }}
+      EXPERIMENT_PREFIX: ${{ inputs.experiment_prefix }}
+      NO_FAIL_ON_CHECKS: ${{ inputs.no_fail_on_checks }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            pyproject.toml
+
+      - name: Install package and dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -e .
+
+      - name: Run synthetic preset for requested seeds
+        run: |
+          set -euxo pipefail
+          mkdir -p evaluation_runs paper_summaries
+          read -r -a SEED_ARGS <<< "${EVAL_SEEDS}"
+          for SEED in "${SEED_ARGS[@]}"; do
+            EXPERIMENT="${EXPERIMENT_PREFIX}_${EVAL_PRESET}_seed${SEED}"
+            ARGS=(
+              --preset "${EVAL_PRESET}"
+              --output-root evaluation_runs
+              --experiment-name "${EXPERIMENT}"
+              --seed "${SEED}"
+              --benchmark-target benchmarks/mipnerf360_sparse_12view.json
+            )
+            if [ "${NO_FAIL_ON_CHECKS}" = "true" ]; then
+              ARGS+=(--no-fail-on-checks)
+            fi
+            python -m gpis_splatting.cli.run_evaluation "${ARGS[@]}"
+          done
+
+      - name: Aggregate synthetic benchmark results
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+
+          root = Path("evaluation_runs")
+          rows = []
+          check_rows = []
+          for experiment_dir in sorted(root.glob("paper_synthetic*")):
+              status_path = experiment_dir / "evaluation_status.json"
+              metrics_path = experiment_dir / "ablation_metrics.csv"
+              if not status_path.exists() or not metrics_path.exists():
+                  continue
+              status = json.loads(status_path.read_text(encoding="utf-8"))
+              metrics = pd.read_csv(metrics_path)
+              seed = None
+              for part in experiment_dir.name.split("_"):
+                  if part.startswith("seed"):
+                      seed = int(part.removeprefix("seed"))
+              for row in metrics.to_dict(orient="records"):
+                  row["experiment"] = experiment_dir.name
+                  row["seed"] = seed
+                  row["preset"] = status.get("preset")
+                  rows.append(row)
+              for check in status.get("checks", []):
+                  check_rows.append({"experiment": experiment_dir.name, "seed": seed, **check})
+
+          if not rows:
+              raise SystemExit("No synthetic metrics found to aggregate.")
+
+          all_metrics = pd.DataFrame(rows)
+          all_checks = pd.DataFrame(check_rows)
+          Path("paper_summaries").mkdir(parents=True, exist_ok=True)
+          all_metrics.to_csv("paper_summaries/synthetic_all_metrics.csv", index=False)
+          all_checks.to_csv("paper_summaries/synthetic_all_checks.csv", index=False)
+
+          summary_columns = [
+              "rmse_sdf",
+              "iou_inside",
+              "nll_distance",
+              "brier_inside",
+              "ece_inside",
+              "psnr_delta",
+              "rmse_delta",
+              "iou_delta",
+          ]
+          present = [column for column in summary_columns if column in all_metrics.columns]
+          group_columns = ["shape", "feedback_iterations", "feedback_selector"]
+          summary = (
+              all_metrics.groupby(group_columns, dropna=False)[present]
+              .agg(["mean", "std", "count"])
+              .reset_index()
+          )
+          summary.columns = ["_".join([str(item) for item in column if str(item)]) for column in summary.columns.to_flat_index()]
+          summary.to_csv("paper_summaries/synthetic_summary_by_variant.csv", index=False)
+
+          if {"shape", "psnr_delta", "rmse_delta", "iou_delta"}.issubset(all_metrics.columns):
+              winners = []
+              for shape, shape_df in all_metrics.groupby("shape"):
+                  candidate = shape_df.sort_values(["psnr_delta", "rmse_delta", "iou_delta"], ascending=[False, True, False], na_position="last").iloc[0]
+                  winners.append(candidate.to_dict())
+              pd.DataFrame(winners).to_csv("paper_summaries/synthetic_winners_by_shape.csv", index=False)
+
+          lines = [
+              "# Paper Synthetic Benchmark Summary",
+              "",
+              f"- Experiments aggregated: `{all_metrics['experiment'].nunique()}`",
+              f"- Rows aggregated: `{len(all_metrics)}`",
+              f"- Seeds: `{sorted(value for value in all_metrics['seed'].dropna().unique())}`",
+              f"- Shapes: `{sorted(all_metrics['shape'].dropna().unique()) if 'shape' in all_metrics else []}`",
+              "",
+              "## Checks",
+              "",
+          ]
+          if not all_checks.empty:
+              check_summary = all_checks.groupby("check")["passed"].agg(["sum", "count"]).reset_index()
+              check_summary["all_passed"] = check_summary["sum"] == check_summary["count"]
+              lines.append(check_summary.to_markdown(index=False))
+          else:
+              lines.append("No checks found.")
+          lines.extend(["", "## Variant summary", "", summary.head(30).to_markdown(index=False)])
+          winners_path = Path("paper_summaries/synthetic_winners_by_shape.csv")
+          if winners_path.exists():
+              winners = pd.read_csv(winners_path)
+              display = [column for column in ["shape", "seed", "feedback_iterations", "feedback_selector", "psnr_delta", "rmse_delta", "iou_delta"] if column in winners.columns]
+              lines.extend(["", "## Winners by shape", "", winners[display].to_markdown(index=False)])
+          Path("paper_summaries/synthetic_summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Publish synthetic summary
+        if: always()
+        run: |
+          if [ -f paper_summaries/synthetic_summary.md ]; then
+            cat paper_summaries/synthetic_summary.md >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Upload synthetic benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: paper-synthetic-${{ env.EVAL_PRESET }}
+          path: |
+            paper_summaries/**/*.csv
+            paper_summaries/**/*.md
+            evaluation_runs/**/ablation_metrics.csv
+            evaluation_runs/**/evaluation_checks.csv
+            evaluation_runs/**/evaluation_config.json
+            evaluation_runs/**/evaluation_report.md
+            evaluation_runs/**/evaluation_status.json
+            evaluation_runs/**/summary/**
