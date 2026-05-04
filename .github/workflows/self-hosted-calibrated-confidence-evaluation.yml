@@ -167,6 +167,62 @@ jobs:
               raise SystemExit(2)
           PY
 
+      - name: Seed Barn auxiliary data from DATA_URL
+        if: ${{ env.TNT_SCENE == 'Barn' }}
+        shell: bash
+        env:
+          DATA_URL: ${{ secrets.DATA_URL }}
+        run: |
+          if [ -z "${DATA_URL}" ]; then
+            echo "DATA_URL secret is required for the Barn auxiliary payload." >&2
+            exit 2
+          fi
+
+          SCENE_DIR="${DOWNLOAD_ROOT}/tanks_temples/${TNT_SCENE}"
+          ARCHIVE="${SCENE_DIR}/_external/barn_owncloud_payload.zip"
+          mkdir -p "$(dirname "${ARCHIVE}")"
+          curl --fail --location --show-error --retry 3 --retry-delay 10 --output "${ARCHIVE}" "${DATA_URL}"
+
+          python - <<'PY'
+          from __future__ import annotations
+
+          import os
+          import shutil
+          import zipfile
+          from pathlib import Path
+
+          scene_dir = Path(os.environ["DOWNLOAD_ROOT"]) / "tanks_temples" / os.environ["TNT_SCENE"]
+          archive = scene_dir / "_external" / "barn_owncloud_payload.zip"
+          extract_dir = scene_dir / "_external" / "barn_owncloud_payload"
+          if extract_dir.exists():
+              shutil.rmtree(extract_dir)
+          extract_dir.mkdir(parents=True, exist_ok=True)
+          with zipfile.ZipFile(archive) as handle:
+              handle.extractall(extract_dir)
+
+          files = [path for path in extract_dir.rglob("*") if path.is_file()]
+
+          def find_file(*suffixes: str) -> Path:
+              normalized_suffixes = tuple(suffix.replace("\\", "/").lower() for suffix in suffixes)
+              for path in files:
+                  rel = path.relative_to(extract_dir).as_posix().lower()
+                  if any(rel.endswith(suffix) for suffix in normalized_suffixes):
+                      return path
+              raise FileNotFoundError(f"None of these payload files were found: {suffixes}")
+
+          mappings = [
+              (find_file("camera_poses/Barn.log", "Barn_COLMAP_SfM.log", "Barn.log"), scene_dir / "camera_poses" / "Barn.log"),
+              (find_file("alignment/Barn.txt", "Barn_trans.txt", "Barn.txt"), scene_dir / "alignment" / "Barn.txt"),
+              (find_file("crop/Barn.json", "Barn.json"), scene_dir / "crop" / "Barn.json"),
+              (find_file("ground_truth/Barn.ply", "Barn.ply"), scene_dir / "ground_truth" / "Barn.ply"),
+              (find_file("sparse/points3D.ply", "points3D.ply"), scene_dir / "reconstruction" / "Barn.ply"),
+          ]
+          for source, destination in mappings:
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(source, destination)
+              print(f"Seeded {destination} from {source} ({destination.stat().st_size} bytes)")
+          PY
+
       - name: Download cached Tanks and Temples data
         run: |
           echo "## ${TNT_SCENE} self-hosted evaluation" >> "${GITHUB_STEP_SUMMARY}"
@@ -237,6 +293,7 @@ jobs:
           method = os.environ["METHOD_NAME"]
           target_threshold = float(os.environ["CALIBRATION_THRESHOLD"])
           eval_dir = Path("real_scenes") / prepared_scene / "evaluations"
+          eval_dir.mkdir(parents=True, exist_ok=True)
           comparison = eval_dir / f"{method}_filtering_splat_filtering_comparison.csv"
           out_csv = eval_dir / f"{method}_paper_key_result.csv"
           out_md = eval_dir / f"{method}_paper_key_result.md"
