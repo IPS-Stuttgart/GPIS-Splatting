@@ -4,16 +4,6 @@ name: Self-hosted Calibrated Confidence Evaluation
 on: # yamllint disable-line rule:truthy
   workflow_dispatch:
     inputs:
-      runner_labels_json:
-        description: JSON array of self-hosted runner labels. Use a trusted manual-only runner.
-        required: true
-        type: string
-        default: '["self-hosted", "linux", "x64"]'
-      scenes_json:
-        description: JSON array of Tanks and Temples scenes.
-        required: true
-        type: string
-        default: '["Ignatius", "Truck"]'
       max_images:
         description: Maximum number of images to extract. Use 0 for all images and the full-scene cache.
         required: true
@@ -90,12 +80,17 @@ concurrency:
 jobs:
   self-hosted-evaluation:
     name: ${{ matrix.scene }} calibrated-confidence large evaluation
-    runs-on: ${{ fromJSON(inputs.runner_labels_json) }}
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
     timeout-minutes: 1440
     strategy:
       fail-fast: false
       matrix:
-        scene: ${{ fromJSON(inputs.scenes_json) }}
+        scene:
+          - Barn
+          - Ignatius
 
     env:
       TNT_SCENE: ${{ matrix.scene }}

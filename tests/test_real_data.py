@@ -692,7 +692,15 @@ def test_prepare_tanks_temples_scene_from_log_fixture(tmp_path: Path) -> None:
 
 
 def test_tanks_temples_registry_exposes_truck_resources() -> None:
-    assert SUPPORTED_TANKS_TEMPLES_SCENES == ("Ignatius", "Truck")
+    assert SUPPORTED_TANKS_TEMPLES_SCENES == ("Barn", "Ignatius", "Truck")
+    barn_resources = {resource.name: resource for resource in TANKS_TEMPLES_SCENES["Barn"].resources}
+    assert set(barn_resources) == {"images", "reconstruction", "camera_log", "alignment", "crop", "ground_truth"}
+    assert barn_resources["images"].relative_path == "image_sets/Barn.zip"
+    assert barn_resources["ground_truth"].url.endswith("/Barn/Barn.ply")
+    assert barn_resources["reconstruction"].archive_member == "Barn.ply"
+    assert barn_resources["camera_log"].archive_member == "Barn.log"
+    assert barn_resources["alignment"].archive_member == "Barn.txt"
+    assert barn_resources["crop"].archive_member == "Barn.json"
     truck_resources = {resource.name: resource for resource in TANKS_TEMPLES_SCENES["Truck"].resources}
     assert set(truck_resources) == {"images", "reconstruction", "camera_log", "alignment", "crop", "ground_truth"}
     assert truck_resources["images"].relative_path == "image_sets/Truck.zip"

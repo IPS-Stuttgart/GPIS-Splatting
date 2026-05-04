@@ -24,7 +24,7 @@ TANKS_TEMPLES_IMAGE_BASE_URL = "https://storage.googleapis.com/t2-downloads/imag
 TANKS_TEMPLES_GT_BASE_URL = "https://storage.googleapis.com/t2-training-gt-data"
 GOOGLE_DRIVE_DOWNLOAD_URL = "https://drive.google.com/uc?export=download&id={file_id}"
 TANKS_TEMPLES_TRAINING_BUNDLE_FILE_ID = "0B-ePgl6HF260dU1pejdkeXdMb00"
-SUPPORTED_TANKS_TEMPLES_SCENES = ("Ignatius", "Truck")
+SUPPORTED_TANKS_TEMPLES_SCENES = ("Barn", "Ignatius", "Truck")
 TANKS_TEMPLES_RESOURCE_NAMES = ("images", "reconstruction", "camera_log", "alignment", "crop", "ground_truth")
 
 
@@ -81,6 +81,19 @@ def training_bundle_resources(scene: str) -> tuple[TanksTemplesResource, ...]:
 
 
 TANKS_TEMPLES_SCENES: dict[str, TanksTemplesSceneSpec] = {
+    "Barn": TanksTemplesSceneSpec(
+        scene="Barn",
+        resources=(
+            image_set_resource("Barn"),
+            *training_bundle_resources("Barn"),
+            TanksTemplesResource(
+                name="ground_truth",
+                relative_path="ground_truth/Barn.ply",
+                url=f"{TANKS_TEMPLES_GT_BASE_URL}/Barn/Barn.ply",
+                source="tanks_temples:training_ground_truth",
+            ),
+        ),
+    ),
     "Ignatius": TanksTemplesSceneSpec(
         scene="Ignatius",
         resources=(
