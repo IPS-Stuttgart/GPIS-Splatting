@@ -11,6 +11,7 @@ on: # yamllint disable-line rule:truthy
         default: Ignatius
         options:
           - Ignatius
+          - Truck
       prepared_scene:
         description: Name of the prepared scene directory under real_scenes/.
         required: true
