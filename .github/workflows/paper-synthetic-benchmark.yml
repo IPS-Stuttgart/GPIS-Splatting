@@ -65,6 +65,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
           python -m pip install -e .
+          python -m pip install tabulate
 
       - name: Run synthetic preset for requested seeds
         run: |
