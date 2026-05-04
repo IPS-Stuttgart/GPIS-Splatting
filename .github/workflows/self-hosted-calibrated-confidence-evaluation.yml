@@ -181,18 +181,64 @@ jobs:
           SCENE_DIR="${DOWNLOAD_ROOT}/tanks_temples/${TNT_SCENE}"
           ARCHIVE="${SCENE_DIR}/_external/barn_owncloud_payload.zip"
           mkdir -p "$(dirname "${ARCHIVE}")"
-          curl --fail --location --show-error --retry 3 --retry-delay 10 --output "${ARCHIVE}" "${DATA_URL}"
 
           python - <<'PY'
           from __future__ import annotations
 
           import os
           import shutil
+          import urllib.parse
+          import urllib.request
           import zipfile
           from pathlib import Path
 
           scene_dir = Path(os.environ["DOWNLOAD_ROOT"]) / "tanks_temples" / os.environ["TNT_SCENE"]
           archive = scene_dir / "_external" / "barn_owncloud_payload.zip"
+          data_url = os.environ["DATA_URL"]
+
+          def data_url_candidates(url: str) -> list[str]:
+              candidates: list[str] = []
+              seen: set[str] = set()
+
+              def add(candidate: str) -> None:
+                  if candidate not in seen:
+                      seen.add(candidate)
+                      candidates.append(candidate)
+
+              add(url)
+              parsed = urllib.parse.urlsplit(url)
+              query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+              if not any(key == "download" for key, _ in query):
+                  add(urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode([*query, ("download", "1")]))))
+              if not parsed.path.rstrip("/").endswith("/download"):
+                  add(urllib.parse.urlunsplit(parsed._replace(path=f"{parsed.path.rstrip('/')}/download")))
+                  add(urllib.parse.urlunsplit(parsed._replace(path=f"{parsed.path.rstrip('/')}/download", query="")))
+              return candidates
+
+          def download_zip_payload(url: str, destination: Path) -> None:
+              errors: list[str] = []
+              for index, candidate in enumerate(data_url_candidates(url), start=1):
+                  temporary = destination.with_suffix(f".candidate{index}.download")
+                  try:
+                      request = urllib.request.Request(candidate, headers={"User-Agent": "GPIS-Splatting-Workflow/1.0"})
+                      with urllib.request.urlopen(request, timeout=120) as response, temporary.open("wb") as handle:
+                          content_type = response.headers.get("content-type", "unknown")
+                          shutil.copyfileobj(response, handle, length=1024 * 1024)
+                      size = temporary.stat().st_size
+                      if zipfile.is_zipfile(temporary):
+                          temporary.replace(destination)
+                          print(f"Downloaded DATA_URL candidate {index} as zip ({size} bytes; content-type={content_type})")
+                          return
+                      prefix = temporary.read_bytes()[:120].decode("utf-8", errors="replace").replace("\n", " ")
+                      errors.append(f"candidate {index}: non-zip {size} bytes, content-type={content_type}, starts={prefix!r}")
+                  except Exception as exc:
+                      errors.append(f"candidate {index}: {type(exc).__name__}: {exc}")
+                  finally:
+                      if temporary.exists():
+                          temporary.unlink()
+              raise ValueError("DATA_URL did not resolve to a zip payload. " + " | ".join(errors))
+
+          download_zip_payload(data_url, archive)
           extract_dir = scene_dir / "_external" / "barn_owncloud_payload"
           if extract_dir.exists():
               shutil.rmtree(extract_dir)
