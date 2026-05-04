@@ -82,11 +82,14 @@ jobs:
     name: ${{ matrix.scene }} calibrated-confidence large evaluation
     runs-on:
       - self-hosted
-      - linux
-      - x64
+      - Linux
+      - X64
+      - gpis-splatting
+      - second-server
     timeout-minutes: 1440
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         scene:
           - Barn
@@ -167,6 +170,108 @@ jobs:
               raise SystemExit(2)
           PY
 
+      - name: Seed Barn auxiliary data from DATA_URL
+        if: ${{ env.TNT_SCENE == 'Barn' }}
+        shell: bash
+        env:
+          DATA_URL: ${{ secrets.DATA_URL }}
+        run: |
+          if [ -z "${DATA_URL}" ]; then
+            echo "DATA_URL secret is required for the Barn auxiliary payload." >&2
+            exit 2
+          fi
+
+          SCENE_DIR="${DOWNLOAD_ROOT}/tanks_temples/${TNT_SCENE}"
+          ARCHIVE="${SCENE_DIR}/_external/barn_owncloud_payload.zip"
+          mkdir -p "$(dirname "${ARCHIVE}")"
+
+          python - <<'PY'
+          from __future__ import annotations
+
+          import os
+          import shutil
+          import urllib.parse
+          import urllib.request
+          import zipfile
+          from pathlib import Path
+
+          scene_dir = Path(os.environ["DOWNLOAD_ROOT"]) / "tanks_temples" / os.environ["TNT_SCENE"]
+          archive = scene_dir / "_external" / "barn_owncloud_payload.zip"
+          data_url = os.environ["DATA_URL"]
+
+          def data_url_candidates(url: str) -> list[str]:
+              candidates: list[str] = []
+              seen: set[str] = set()
+
+              def add(candidate: str) -> None:
+                  if candidate not in seen:
+                      seen.add(candidate)
+                      candidates.append(candidate)
+
+              add(url)
+              parsed = urllib.parse.urlsplit(url)
+              query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+              if not any(key == "download" for key, _ in query):
+                  add(urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode([*query, ("download", "1")]))))
+              if not parsed.path.rstrip("/").endswith("/download"):
+                  add(urllib.parse.urlunsplit(parsed._replace(path=f"{parsed.path.rstrip('/')}/download")))
+                  add(urllib.parse.urlunsplit(parsed._replace(path=f"{parsed.path.rstrip('/')}/download", query="")))
+              return candidates
+
+          def download_zip_payload(url: str, destination: Path) -> None:
+              errors: list[str] = []
+              for index, candidate in enumerate(data_url_candidates(url), start=1):
+                  temporary = destination.with_suffix(f".candidate{index}.download")
+                  try:
+                      request = urllib.request.Request(candidate, headers={"User-Agent": "GPIS-Splatting-Workflow/1.0"})
+                      with urllib.request.urlopen(request, timeout=120) as response, temporary.open("wb") as handle:
+                          content_type = response.headers.get("content-type", "unknown")
+                          shutil.copyfileobj(response, handle, length=1024 * 1024)
+                      size = temporary.stat().st_size
+                      if zipfile.is_zipfile(temporary):
+                          temporary.replace(destination)
+                          print(f"Downloaded DATA_URL candidate {index} as zip ({size} bytes; content-type={content_type})")
+                          return
+                      prefix = temporary.read_bytes()[:120].decode("utf-8", errors="replace").replace("\n", " ")
+                      errors.append(f"candidate {index}: non-zip {size} bytes, content-type={content_type}, starts={prefix!r}")
+                  except Exception as exc:
+                      errors.append(f"candidate {index}: {type(exc).__name__}: {exc}")
+                  finally:
+                      if temporary.exists():
+                          temporary.unlink()
+              raise ValueError("DATA_URL did not resolve to a zip payload. " + " | ".join(errors))
+
+          download_zip_payload(data_url, archive)
+          extract_dir = scene_dir / "_external" / "barn_owncloud_payload"
+          if extract_dir.exists():
+              shutil.rmtree(extract_dir)
+          extract_dir.mkdir(parents=True, exist_ok=True)
+          with zipfile.ZipFile(archive) as handle:
+              handle.extractall(extract_dir)
+
+          files = [path for path in extract_dir.rglob("*") if path.is_file()]
+
+          def find_file(*suffixes: str) -> Path:
+              normalized_suffixes = tuple(suffix.replace("\\", "/").lower() for suffix in suffixes)
+              for path in files:
+                  rel = path.relative_to(extract_dir).as_posix().lower()
+                  if any(rel.endswith(suffix) for suffix in normalized_suffixes):
+                      return path
+              raise FileNotFoundError(f"None of these payload files were found: {suffixes}")
+
+          mappings = [
+              (find_file("camera_poses/Barn.log", "Barn_COLMAP_SfM.log", "Barn.log"), scene_dir / "camera_poses" / "Barn.log"),
+              (find_file("alignment/Barn.txt", "Barn_trans.txt", "Barn.txt"), scene_dir / "alignment" / "Barn.txt"),
+              (find_file("crop/Barn.json", "Barn.json"), scene_dir / "crop" / "Barn.json"),
+              (find_file("ground_truth/Barn.ply", "Barn.ply"), scene_dir / "ground_truth" / "Barn.ply"),
+              (find_file("sparse/points3D.ply", "points3D.ply"), scene_dir / "reconstruction" / "Barn.ply"),
+          ]
+          for source, destination in mappings:
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(source, destination)
+              print(f"Seeded {destination} from {source} ({destination.stat().st_size} bytes)")
+          PY
+
       - name: Download cached Tanks and Temples data
         run: |
           echo "## ${TNT_SCENE} self-hosted evaluation" >> "${GITHUB_STEP_SUMMARY}"
@@ -237,6 +342,7 @@ jobs:
           method = os.environ["METHOD_NAME"]
           target_threshold = float(os.environ["CALIBRATION_THRESHOLD"])
           eval_dir = Path("real_scenes") / prepared_scene / "evaluations"
+          eval_dir.mkdir(parents=True, exist_ok=True)
           comparison = eval_dir / f"{method}_filtering_splat_filtering_comparison.csv"
           out_csv = eval_dir / f"{method}_paper_key_result.csv"
           out_md = eval_dir / f"{method}_paper_key_result.md"
