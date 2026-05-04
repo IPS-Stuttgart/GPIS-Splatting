@@ -89,8 +89,8 @@ jobs:
       fail-fast: false
       matrix:
         scene:
+          - Barn
           - Ignatius
-          - Truck
 
     env:
       TNT_SCENE: ${{ matrix.scene }}
