@@ -82,11 +82,14 @@ jobs:
     name: ${{ matrix.scene }} calibrated-confidence large evaluation
     runs-on:
       - self-hosted
-      - linux
-      - x64
+      - Linux
+      - X64
+      - gpis-splatting
+      - second-server
     timeout-minutes: 1440
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         scene:
           - Barn
