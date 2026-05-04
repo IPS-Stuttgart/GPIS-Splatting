@@ -10,10 +10,10 @@ on: # yamllint disable-line rule:truthy
         type: string
         default: '["self-hosted", "linux", "x64"]'
       scenes_json:
-        description: JSON array of Tanks and Temples scenes. The current code supports Ignatius; extend tanks_temples.py before adding more scenes.
+        description: JSON array of Tanks and Temples scenes.
         required: true
         type: string
-        default: '["Ignatius"]'
+        default: '["Ignatius", "Truck"]'
       max_images:
         description: Maximum number of images to extract. Use 0 for all images and the full-scene cache.
         required: true
@@ -169,7 +169,6 @@ jobs:
           if scene not in SUPPORTED_TANKS_TEMPLES_SCENES:
               supported = ", ".join(SUPPORTED_TANKS_TEMPLES_SCENES)
               print(f"Unsupported scene {scene!r}. Current supported scenes: {supported}.", file=sys.stderr)
-              print("Extend gpis_splatting.tanks_temples before adding this scene to the self-hosted matrix.", file=sys.stderr)
               raise SystemExit(2)
           PY
 

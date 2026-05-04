@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -7,6 +8,7 @@ import pandas as pd
 import torch
 from PIL import Image
 
+from gpis_splatting import tanks_temples as tanks_temples_module
 from gpis_splatting.cli.audit_real_renders import main as audit_real_renders_main
 from gpis_splatting.cli.bootstrap_real_gpis import main as bootstrap_real_gpis_main
 from gpis_splatting.cli.calibrate_gpis_splat_scores import main as calibrate_gpis_splat_scores_main
@@ -31,7 +33,13 @@ from gpis_splatting.real_geometry import crop_mask, evaluate_geometry_group
 from gpis_splatting.real_scene import build_sparse_split
 from gpis_splatting.serialization import read_json, write_json
 from gpis_splatting.splats import SplatCloud, load_splats, save_splats
-from gpis_splatting.tanks_temples import google_drive_confirm_url_from_html, read_tanks_temples_log
+from gpis_splatting.tanks_temples import (
+    SUPPORTED_TANKS_TEMPLES_SCENES,
+    TANKS_TEMPLES_SCENES,
+    TANKS_TEMPLES_TRAINING_BUNDLE_URL,
+    google_drive_confirm_url_from_html,
+    read_tanks_temples_log,
+)
 
 
 def test_prepare_validate_and_evaluate_transforms_scene(tmp_path: Path) -> None:
@@ -683,6 +691,96 @@ def test_prepare_tanks_temples_scene_from_log_fixture(tmp_path: Path) -> None:
     assert (scene_dir / "images" / "000000.jpg").exists()
 
 
+def test_tanks_temples_registry_exposes_truck_resources() -> None:
+    assert SUPPORTED_TANKS_TEMPLES_SCENES == ("Ignatius", "Truck")
+    truck_resources = {resource.name: resource for resource in TANKS_TEMPLES_SCENES["Truck"].resources}
+    assert set(truck_resources) == {"images", "reconstruction", "camera_log", "alignment", "crop", "ground_truth"}
+    assert truck_resources["images"].relative_path == "image_sets/Truck.zip"
+    assert truck_resources["ground_truth"].url.endswith("/Truck/Truck.ply")
+    assert truck_resources["reconstruction"].archive_member == "Truck.ply"
+    assert truck_resources["camera_log"].archive_member == "Truck.log"
+    assert truck_resources["alignment"].archive_member == "Truck.txt"
+    assert truck_resources["crop"].archive_member == "Truck.json"
+
+
+def test_download_truck_auxiliary_from_training_bundle(tmp_path: Path) -> None:
+    original_download_url = tanks_temples_module.download_url
+    calls = []
+
+    def fake_download_url(url: str, destination: Path) -> None:
+        calls.append(url)
+        if url != TANKS_TEMPLES_TRAINING_BUNDLE_URL:
+            raise AssertionError(f"Unexpected URL: {url}")
+        with zipfile.ZipFile(destination, "w") as archive:
+            archive.writestr("training/Truck.ply", _tiny_ascii_ply())
+            archive.writestr(
+                "training/Truck.log",
+                "\n".join(
+                    [
+                        "0 0 0",
+                        "1 0 0 0",
+                        "0 1 0 0",
+                        "0 0 1 1",
+                        "0 0 0 1",
+                    ]
+                )
+                + "\n",
+            )
+            archive.writestr("training/Truck.txt", "1 0 0 0\n0 1 0 0\n0 0 1 0\n0 0 0 1\n")
+            archive.writestr("training/Truck.json", '{"min": [-1, -1, -1], "max": [1, 1, 1]}')
+
+    try:
+        tanks_temples_module.download_url = fake_download_url
+        result = tanks_temples_module.download_tanks_temples_scene(
+            scene="Truck",
+            output_root=tmp_path,
+            include_images=False,
+            include_ground_truth=False,
+            resources=("reconstruction", "camera_log", "alignment", "crop"),
+        )
+    finally:
+        tanks_temples_module.download_url = original_download_url
+
+    output_dir = result["output_dir"]
+    assert calls == [TANKS_TEMPLES_TRAINING_BUNDLE_URL]
+    assert (output_dir / "reconstruction" / "Truck.ply").exists()
+    assert (output_dir / "camera_poses" / "Truck.log").exists()
+    assert (output_dir / "alignment" / "Truck.txt").exists()
+    assert (output_dir / "crop" / "Truck.json").exists()
+    assert result["report"]["downloaded_count"] == 4
+    assert {resource["archive_member"] for resource in result["report"]["resources"]} == {"Truck.ply", "Truck.log", "Truck.txt", "Truck.json"}
+
+
+def test_prepare_tanks_temples_scene_accepts_truck_fixture(tmp_path: Path) -> None:
+    source = _write_tanks_temples_fixture(tmp_path / "tanks_temples" / "Truck", scene="Truck")
+    root = tmp_path / "real_scenes"
+
+    prepare_tanks_temples_scene_main(
+        [
+            "--input-dir",
+            str(source),
+            "--scene",
+            "Truck",
+            "--prepared-scene",
+            "truck_fixture",
+            "--output-root",
+            str(root),
+            "--train-view-count",
+            "2",
+        ]
+    )
+
+    scene_dir = root / "truck_fixture"
+    scene_meta = read_json(scene_dir / "real_scene.json")
+    validation = read_json(scene_dir / "validation.json")
+    assert scene_meta["source_scene"] == "Truck"
+    assert Path(scene_meta["tanks_temples"]["camera_log_path"]).parts[-2:] == ("camera_poses", "Truck.log")
+    assert Path(scene_meta["tanks_temples"]["reconstruction_path"]).parts[-2:] == ("reconstruction", "Truck.ply")
+    assert Path(scene_meta["tanks_temples"]["ground_truth_path"]).parts[-2:] == ("ground_truth", "Truck.ply")
+    assert validation["passed"] is True
+    assert (scene_dir / "images" / "000000.jpg").exists()
+
+
 def test_read_tanks_temples_log_rejects_incomplete_pose(tmp_path: Path) -> None:
     log_path = tmp_path / "bad.log"
     log_path.write_text("0 0 0\n1 0 0 0\n", encoding="utf-8")
@@ -1314,8 +1412,8 @@ def _prepare_colmap_scene_with_points(tmp_path: Path) -> Path:
     return root
 
 
-def _write_tanks_temples_fixture(root: Path) -> Path:
-    image_dir = root / "image_sets" / "Ignatius"
+def _write_tanks_temples_fixture(root: Path, *, scene: str = "Ignatius") -> Path:
+    image_dir = root / "image_sets" / scene
     image_dir.mkdir(parents=True)
     width, height = 8, 6
     for index in range(3):
@@ -1326,7 +1424,7 @@ def _write_tanks_temples_fixture(root: Path) -> Path:
         Image.fromarray(data, mode="RGB").save(image_dir / f"{index:06d}.jpg")
 
     (root / "camera_poses").mkdir()
-    (root / "camera_poses" / "Ignatius.log").write_text(
+    (root / "camera_poses" / f"{scene}.log").write_text(
         "\n".join(
             [
                 "0 0 0",
@@ -1357,7 +1455,7 @@ def _write_tanks_temples_fixture(root: Path) -> Path:
     ):
         target_dir = root / directory
         target_dir.mkdir()
-        (target_dir / f"Ignatius{suffix}").write_text(content, encoding="utf-8")
+        (target_dir / f"{scene}{suffix}").write_text(content, encoding="utf-8")
     return root
 
 

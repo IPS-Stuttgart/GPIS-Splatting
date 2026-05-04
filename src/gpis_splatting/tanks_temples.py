@@ -8,7 +8,7 @@ import urllib.request
 import zipfile
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import numpy as np
@@ -23,7 +23,8 @@ TANKS_TEMPLES_LICENSE_URL = "https://www.tanksandtemples.org/license/"
 TANKS_TEMPLES_IMAGE_BASE_URL = "https://storage.googleapis.com/t2-downloads/image_sets"
 TANKS_TEMPLES_GT_BASE_URL = "https://storage.googleapis.com/t2-training-gt-data"
 GOOGLE_DRIVE_DOWNLOAD_URL = "https://drive.google.com/uc?export=download&id={file_id}"
-SUPPORTED_TANKS_TEMPLES_SCENES = ("Ignatius",)
+TANKS_TEMPLES_TRAINING_BUNDLE_FILE_ID = "0B-ePgl6HF260dU1pejdkeXdMb00"
+SUPPORTED_TANKS_TEMPLES_SCENES = ("Ignatius", "Truck")
 TANKS_TEMPLES_RESOURCE_NAMES = ("images", "reconstruction", "camera_log", "alignment", "crop", "ground_truth")
 
 
@@ -34,6 +35,7 @@ class TanksTemplesResource:
     url: str
     source: str
     archive: bool = False
+    archive_member: str | None = None
 
 
 @dataclass(frozen=True)
@@ -46,17 +48,43 @@ def google_drive_url(file_id: str) -> str:
     return GOOGLE_DRIVE_DOWNLOAD_URL.format(file_id=file_id)
 
 
+TANKS_TEMPLES_TRAINING_BUNDLE_URL = google_drive_url(TANKS_TEMPLES_TRAINING_BUNDLE_FILE_ID)
+
+
+def image_set_resource(scene: str) -> TanksTemplesResource:
+    return TanksTemplesResource(
+        name="images",
+        relative_path=f"image_sets/{scene}.zip",
+        url=f"{TANKS_TEMPLES_IMAGE_BASE_URL}/{scene}.zip",
+        source="tanks_temples:image_set",
+        archive=True,
+    )
+
+
+def training_bundle_resource(name: str, scene: str, relative_dir: str, suffix: str) -> TanksTemplesResource:
+    return TanksTemplesResource(
+        name=name,
+        relative_path=f"{relative_dir}/{scene}{suffix}",
+        url=TANKS_TEMPLES_TRAINING_BUNDLE_URL,
+        source="tanks_temples:training_bundle",
+        archive_member=f"{scene}{suffix}",
+    )
+
+
+def training_bundle_resources(scene: str) -> tuple[TanksTemplesResource, ...]:
+    return (
+        training_bundle_resource("reconstruction", scene, "reconstruction", ".ply"),
+        training_bundle_resource("camera_log", scene, "camera_poses", ".log"),
+        training_bundle_resource("alignment", scene, "alignment", ".txt"),
+        training_bundle_resource("crop", scene, "crop", ".json"),
+    )
+
+
 TANKS_TEMPLES_SCENES: dict[str, TanksTemplesSceneSpec] = {
     "Ignatius": TanksTemplesSceneSpec(
         scene="Ignatius",
         resources=(
-            TanksTemplesResource(
-                name="images",
-                relative_path="image_sets/Ignatius.zip",
-                url=f"{TANKS_TEMPLES_IMAGE_BASE_URL}/Ignatius.zip",
-                source="tanks_temples:image_set",
-                archive=True,
-            ),
+            image_set_resource("Ignatius"),
             TanksTemplesResource(
                 name="reconstruction",
                 relative_path="reconstruction/Ignatius.ply",
@@ -88,7 +116,20 @@ TANKS_TEMPLES_SCENES: dict[str, TanksTemplesSceneSpec] = {
                 source="tanks_temples:training_ground_truth",
             ),
         ),
-    )
+    ),
+    "Truck": TanksTemplesSceneSpec(
+        scene="Truck",
+        resources=(
+            image_set_resource("Truck"),
+            *training_bundle_resources("Truck"),
+            TanksTemplesResource(
+                name="ground_truth",
+                relative_path="ground_truth/Truck.ply",
+                url=f"{TANKS_TEMPLES_GT_BASE_URL}/Truck/Truck.ply",
+                source="tanks_temples:training_ground_truth",
+            ),
+        ),
+    ),
 }
 
 
@@ -126,23 +167,32 @@ def download_tanks_temples_scene(
 
     downloaded = []
     skipped = []
-    resources = []
+    resource_records = []
+    archive_cache: dict[str, Path] = {}
     for resource in selected_resources:
         destination = output_dir / resource.relative_path
         existed = destination.exists()
         if not existed or force:
             destination.parent.mkdir(parents=True, exist_ok=True)
-            download_url(resource.url, destination)
+            if resource.archive_member is None:
+                download_url(resource.url, destination)
+            else:
+                archive_path = archive_cache.setdefault(resource.url, output_dir / "_archives" / archive_cache_filename(resource.url))
+                if force or not archive_path.exists():
+                    archive_path.parent.mkdir(parents=True, exist_ok=True)
+                    download_url(resource.url, archive_path)
+                extract_archive_member(archive_path, destination, member_name=resource.archive_member)
             downloaded.append(str(destination))
         else:
             skipped.append(str(destination))
-        resources.append(
+        resource_records.append(
             {
                 "name": resource.name,
                 "path": str(destination),
                 "url": resource.url,
                 "source": resource.source,
                 "archive": resource.archive,
+                "archive_member": resource.archive_member,
             }
         )
 
@@ -170,7 +220,7 @@ def download_tanks_temples_scene(
         "skipped_count": len(skipped),
         "downloaded": downloaded,
         "skipped": skipped,
-        "resources": resources,
+        "resources": resource_records,
         "extracted_image_count": len(extracted_images),
         "extracted_images": extracted_images,
     }
@@ -299,6 +349,39 @@ def download_google_drive_url(url: str, destination: Path) -> None:
 def write_response_to_path(response: Any, destination: Path) -> None:
     with response, destination.open("wb") as handle:
         shutil.copyfileobj(response, handle)
+
+
+def archive_cache_filename(url: str) -> str:
+    parsed = urllib.parse.urlparse(url)
+    query = urllib.parse.parse_qs(parsed.query)
+    if "id" in query and query["id"]:
+        return f"{sanitize_filename(query['id'][0])}.zip"
+    name = Path(parsed.path).name
+    return sanitize_filename(name or "archive.zip")
+
+
+def sanitize_filename(value: str) -> str:
+    sanitized = re.sub(r"[^0-9A-Za-z._-]+", "_", value).strip("._")
+    return sanitized or "archive.zip"
+
+
+def extract_archive_member(zip_path: Path, destination: Path, *, member_name: str) -> None:
+    with zipfile.ZipFile(zip_path) as archive:
+        members = [
+            member
+            for member in archive.infolist()
+            if not member.is_dir()
+            and PurePosixPath(member.filename).name == member_name
+            and "__MACOSX" not in PurePosixPath(member.filename).parts
+            and not PurePosixPath(member.filename).name.startswith("._")
+        ]
+        if not members:
+            raise FileNotFoundError(f"Could not find {member_name!r} in Tanks and Temples archive {zip_path}.")
+        if len(members) > 1:
+            formatted = ", ".join(member.filename for member in members)
+            raise ValueError(f"Ambiguous Tanks and Temples archive member {member_name!r}: {formatted}")
+        with archive.open(members[0]) as src, destination.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
 
 
 def google_drive_confirm_token(cookie_jar: http.cookiejar.CookieJar) -> str | None:
