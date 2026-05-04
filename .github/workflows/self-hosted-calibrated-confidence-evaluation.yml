@@ -4,11 +4,6 @@ name: Self-hosted Calibrated Confidence Evaluation
 on: # yamllint disable-line rule:truthy
   workflow_dispatch:
     inputs:
-      scenes_json:
-        description: JSON array of Tanks and Temples scenes.
-        required: true
-        type: string
-        default: '["Ignatius", "Truck"]'
       max_images:
         description: Maximum number of images to extract. Use 0 for all images and the full-scene cache.
         required: true
@@ -93,7 +88,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scene: ${{ fromJSON(inputs.scenes_json) }}
+        scene:
+          - Ignatius
+          - Truck
 
     env:
       TNT_SCENE: ${{ matrix.scene }}
