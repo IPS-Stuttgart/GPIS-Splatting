@@ -357,6 +357,40 @@ diagnostics, and calibrates splat confidence on nearest-ground-truth labels. The
 confidence rejects floating or off-surface artifacts, rather than mostly ranking already-good source splats. It also exports the
 threshold-specific calibrated gates needed by downstream geometry and rendering checks.
 
+## Trained 3DGS Integration
+
+To make the GPIS confidence signal comparable with standard 3DGS render metrics, convert a trained 3DGS Gaussian PLY into the internal
+splat format, score/calibrate its centers with the existing GPIS tools, then export renderable 3DGS PLY variants:
+
+```powershell
+convert_3dgs_ply_to_splats `
+  --input-ply C:\runs\3dgs\barn\point_cloud\iteration_30000\point_cloud.ply `
+  --output-splats real_scenes\barn_selfhosted_m25000_t2500_s12\trained_3dgs_splats.npz
+
+$gaussianCount = 123456  # replace with the `splats:` count printed by convert_3dgs_ply_to_splats
+
+diagnose_tanks_temples_gpis_field_scores `
+  --scene barn_selfhosted_m25000_t2500_s12 `
+  --splats-path trained_3dgs_splats.npz `
+  --model-path selfhosted_calibrated_confidence_gpis_model.npz `
+  --method-name trained_3dgs `
+  --max-pred-points 0
+
+calibrate_gpis_splat_scores `
+  --field-scores-path real_scenes\barn_selfhosted_m25000_t2500_s12\evaluations\trained_3dgs_gpis_field_scores.csv `
+  --gate-count $gaussianCount
+
+export_3dgs_gpis_variants `
+  --input-ply C:\runs\3dgs\barn\point_cloud\iteration_30000\point_cloud.ply `
+  --gate-path real_scenes\barn_selfhosted_m25000_t2500_s12\evaluations\trained_3dgs_calibrated_gate_0p05.npz `
+  --output-dir C:\runs\3dgs\barn_gpis_variants `
+  --iteration 30000
+```
+
+Each exported variant is written as `model_dir/point_cloud/iteration_<n>/point_cloud.ply`, preserving the trained Gaussian properties.
+Render those model directories with the standard 3DGS renderer, then pass the predictions to `evaluate_real_renders` for PSNR/SSIM and
+optional LPIPS.
+
 Sweep GPIS pseudo-SDF construction and model hyperparameters against those gate-quality diagnostics:
 
 ```powershell
