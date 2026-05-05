@@ -493,7 +493,7 @@ jobs:
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/evaluations/**/*.csv
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/evaluations/**/*.json
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/evaluations/**/*.md
-            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/evaluations/**/*.npz
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/evaluations/**/*.npz
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/renders/**/real_render_report.json
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/renders/**/*.jpg
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/renders/**/*.jpeg
