@@ -142,14 +142,39 @@ jobs:
 
       - name: Restore cached Tanks and Temples assets
         id: tnt-cache
-        uses: actions/cache@v4
-        with:
-          path: real_scenes/_downloads/tanks_temples/${{ env.TNT_SCENE }}
-          key: tnt-${{ runner.os }}-${{ runner.arch }}-${{ env.TNT_SCENE }}-images${{ env.MAX_IMAGES }}-${{ env.DATA_CACHE_VERSION }}
-          restore-keys: |
-            tnt-${{ runner.os }}-${{ runner.arch }}-${{ env.TNT_SCENE }}-images
-            tnt-${{ runner.os }}-${{ runner.arch }}-${{ env.TNT_SCENE }}-
-            tnt-${{ runner.os }}-${{ env.TNT_SCENE }}-
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import os
+          import shutil
+          from pathlib import Path
+
+          cache_base = Path(os.environ.get("RUNNER_TOOL_CACHE") or Path.home() / ".cache")
+          cache_dir = (
+              cache_base
+              / "gpis-splatting"
+              / "tanks-temples"
+              / os.environ["DATA_CACHE_VERSION"]
+              / os.environ["TNT_SCENE"]
+              / f"images{os.environ['MAX_IMAGES']}"
+          )
+          destination = Path(os.environ["DOWNLOAD_ROOT"]) / "tanks_temples" / os.environ["TNT_SCENE"]
+          cache_hit = cache_dir.is_dir() and any(cache_dir.iterdir())
+          if cache_hit:
+              if destination.exists():
+                  shutil.rmtree(destination)
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copytree(cache_dir, destination)
+              print(f"Restored {os.environ['TNT_SCENE']} data from local runner cache: {cache_dir}")
+          else:
+              print(f"No local runner cache found at {cache_dir}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              print(f"cache-hit={'true' if cache_hit else 'false'}", file=handle)
+              print(f"cache-dir={cache_dir}", file=handle)
+          PY
 
       - name: Install package and dependencies
         run: |
@@ -280,6 +305,31 @@ jobs:
             --scene "${TNT_SCENE}" \
             --output-root "${DOWNLOAD_ROOT}" \
             --max-images "${MAX_IMAGES}"
+
+      - name: Save Tanks and Temples assets to local runner cache
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import os
+          import shutil
+          from pathlib import Path
+
+          source = Path(os.environ["DOWNLOAD_ROOT"]) / "tanks_temples" / os.environ["TNT_SCENE"]
+          cache_dir = Path("${{ steps.tnt-cache.outputs.cache-dir }}")
+          if not source.is_dir() or not any(source.iterdir()):
+              raise SystemExit(f"Refusing to cache missing or empty scene directory: {source}")
+          temporary = cache_dir.with_name(f"{cache_dir.name}.tmp-{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_JOB']}")
+          if temporary.exists():
+              shutil.rmtree(temporary)
+          temporary.parent.mkdir(parents=True, exist_ok=True)
+          shutil.copytree(source, temporary)
+          if cache_dir.exists():
+              shutil.rmtree(cache_dir)
+          temporary.replace(cache_dir)
+          print(f"Saved {os.environ['TNT_SCENE']} data to local runner cache: {cache_dir}")
+          PY
 
       - name: Prepare normalized real scene
         run: |
@@ -443,7 +493,7 @@ jobs:
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/evaluations/**/*.csv
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/evaluations/**/*.json
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/evaluations/**/*.md
-            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/evaluations/**/*.npz
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/evaluations/**/*.npz
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/renders/**/real_render_report.json
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/renders/**/*.jpg
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/renders/**/*.jpeg
