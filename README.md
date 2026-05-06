@@ -359,8 +359,23 @@ threshold-specific calibrated gates needed by downstream geometry and rendering 
 
 ## Trained 3DGS Integration
 
-To make the GPIS confidence signal comparable with standard 3DGS render metrics, convert a trained 3DGS Gaussian PLY into the internal
-splat format, score/calibrate its centers with the existing GPIS tools, then export renderable 3DGS PLY variants:
+To make the GPIS confidence signal comparable with standard 3DGS render metrics, first export a prepared real scene into the standard
+COLMAP text layout used by the reference 3DGS trainer:
+
+```powershell
+export_prepared_scene_to_colmap_3dgs `
+  --scene ignatius_selfhosted_m25000_t2500_s12 `
+  --output-dir C:\runs\3dgs\ignatius_gpis_scene `
+  --split train `
+  --max-points 100000
+```
+
+The exporter writes `images/` plus `sparse/0/cameras.txt`, `sparse/0/images.txt`, and `sparse/0/points3D.txt`. It copies the selected
+prepared-scene images, writes COLMAP `PINHOLE` cameras from the normalized camera metadata, and initializes sparse points from the scene's
+Tanks and Temples reconstruction, COLMAP `points3D.txt`, or an explicit `.ply`/internal splats `.npz` passed with `--points-path`.
+
+Train the standard 3DGS implementation on that exported directory. Then convert the trained 3DGS Gaussian PLY into the internal splat
+format, score/calibrate its centers with the existing GPIS tools, and export renderable 3DGS PLY variants:
 
 ```powershell
 convert_3dgs_ply_to_splats `
