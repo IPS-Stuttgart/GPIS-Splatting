@@ -47,6 +47,7 @@ run_tanks_temples_hard_negative_calibration = "gpis_splatting.cli.run_tanks_temp
 run_tanks_temples_calibrated_splat_filtering = "gpis_splatting.cli.run_tanks_temples_calibrated_splat_filtering:main"
 run_tanks_temples_calibrated_confidence = "gpis_splatting.cli.run_tanks_temples_calibrated_confidence:main"
 convert_3dgs_ply_to_splats = "gpis_splatting.cli.convert_3dgs_ply_to_splats:main"
+export_prepared_scene_to_colmap_3dgs = "gpis_splatting.cli.export_prepared_scene_to_colmap_3dgs:main"
 export_3dgs_gpis_variants = "gpis_splatting.cli.export_3dgs_gpis_variants:main"
 evaluate_3dgs_variant_renders = "gpis_splatting.cli.evaluate_3dgs_variant_renders:main"
 

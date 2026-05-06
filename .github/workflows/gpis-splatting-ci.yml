@@ -211,6 +211,7 @@ jobs:
           run_tanks_temples_calibrated_splat_filtering --help > /dev/null
           run_tanks_temples_calibrated_confidence --help > /dev/null
           convert_3dgs_ply_to_splats --help > /dev/null
+          export_prepared_scene_to_colmap_3dgs --help > /dev/null
           export_3dgs_gpis_variants --help > /dev/null
           evaluate_3dgs_variant_renders --help > /dev/null
 
