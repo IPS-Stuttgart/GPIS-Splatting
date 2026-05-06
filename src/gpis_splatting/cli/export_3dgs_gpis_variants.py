@@ -19,6 +19,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--write-filtered", type=str_to_bool, default=True)
     parser.add_argument("--opacity-mode", choices=["logit", "linear"], default="logit")
     parser.add_argument("--opacity-scale-floor", type=float, default=0.0)
+    parser.add_argument(
+        "--template-model-dir",
+        default=None,
+        help="Optional source 3DGS model directory whose cfg_args/cameras.json/exposure.json are copied into each variant. Inferred from standard input PLY paths when omitted.",
+    )
     return parser
 
 
@@ -36,6 +41,7 @@ def main(argv: list[str] | None = None) -> None:
         write_filtered=args.write_filtered,
         opacity_mode=args.opacity_mode,
         opacity_scale_floor=args.opacity_scale_floor,
+        template_model_dir=args.template_model_dir,
     )
     print(f"Wrote {result['manifest_path']}")
     print(f"Wrote {result['status_path']}")

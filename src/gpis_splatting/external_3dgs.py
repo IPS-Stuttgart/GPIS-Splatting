@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from gpis_splatting.serialization import write_json
 from gpis_splatting.splats import SplatCloud, save_splats
 
 SH_C0 = 0.28209479177387814
+THREE_DGS_RENDER_CONFIG_FILES = ("cfg_args", "cameras.json", "exposure.json")
 PLY_SCALAR_TYPES = {
     "char",
     "int8",
@@ -191,6 +193,7 @@ def export_3dgs_gpis_variants(
     write_filtered: bool = True,
     opacity_mode: str = "logit",
     opacity_scale_floor: float = 0.0,
+    template_model_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     validate_export_config(
         iteration=iteration,
@@ -244,6 +247,8 @@ def export_3dgs_gpis_variants(
                 )
             )
 
+    render_config_template = resolve_render_config_template(input_ply_path=input_ply_path, template_model_dir=template_model_dir)
+    copied_render_config_files = copy_render_config_files(render_config_template, rows)
     manifest = pd.DataFrame(rows)
     manifest_path = out_dir / f"{method_name}_3dgs_variant_manifest.csv"
     status_path = out_dir / f"{method_name}_3dgs_variant_status.json"
@@ -263,12 +268,50 @@ def export_3dgs_gpis_variants(
         "gate_max": float(gates.max()) if gates.size else None,
         "gate_mean": float(gates.mean()) if gates.size else None,
         "variant_count": int(len(rows)),
+        "render_config_template_model_dir": str(render_config_template) if render_config_template is not None else None,
+        "copied_render_config_files": copied_render_config_files,
         "manifest_path": str(manifest_path),
         "report_path": str(report_path),
     }
     write_json(status_path, status)
     report_path.write_text(format_3dgs_variant_report(status, manifest), encoding="utf-8")
     return {"manifest_path": manifest_path, "status_path": status_path, "report_path": report_path, "manifest": manifest, "status": status}
+
+
+def resolve_render_config_template(*, input_ply_path: str | Path, template_model_dir: str | Path | None) -> Path | None:
+    if template_model_dir is not None:
+        model_dir = Path(template_model_dir)
+        if not model_dir.is_dir():
+            raise FileNotFoundError(f"Template 3DGS model directory does not exist: {model_dir}")
+        return model_dir
+    return infer_standard_3dgs_model_dir(input_ply_path)
+
+
+def infer_standard_3dgs_model_dir(input_ply_path: str | Path) -> Path | None:
+    path = Path(input_ply_path)
+    if path.name != "point_cloud.ply":
+        return None
+    if path.parent.name.startswith("iteration_") and path.parent.parent.name == "point_cloud":
+        model_dir = path.parent.parent.parent
+        if (model_dir / "cfg_args").exists():
+            return model_dir
+    return None
+
+
+def copy_render_config_files(template_model_dir: Path | None, rows: list[dict[str, Any]]) -> list[str]:
+    if template_model_dir is None:
+        return []
+    copied: list[str] = []
+    for name in THREE_DGS_RENDER_CONFIG_FILES:
+        source = template_model_dir / name
+        if not source.is_file():
+            continue
+        copied.append(name)
+        for row in rows:
+            target = Path(str(row["model_dir"])) / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+    return copied
 
 
 def evaluate_3dgs_variant_renders(
@@ -601,6 +644,8 @@ def format_3dgs_variant_report(status: dict[str, Any], manifest: pd.DataFrame) -
         f"- Gate NPZ: `{status['gate_path']}`",
         f"- Input Gaussians: `{status['input_gaussian_count']}`",
         f"- Variants: `{status['variant_count']}`",
+        f"- Render config template: `{status.get('render_config_template_model_dir') or 'n/a'}`",
+        f"- Copied render config files: `{', '.join(status.get('copied_render_config_files', [])) or 'none'}`",
         "",
         "Render each `model_dir` with the standard 3DGS renderer and evaluate predictions with `evaluate_real_renders` to obtain PSNR/SSIM/LPIPS.",
     ]
