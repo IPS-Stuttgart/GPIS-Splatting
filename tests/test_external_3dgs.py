@@ -3,8 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
+from PIL import Image
 
 from gpis_splatting.cli.convert_3dgs_ply_to_splats import main as convert_3dgs_ply_to_splats_main
+from gpis_splatting.cli.evaluate_3dgs_variant_renders import main as evaluate_3dgs_variant_renders_main
 from gpis_splatting.cli.export_3dgs_gpis_variants import main as export_3dgs_gpis_variants_main
 from gpis_splatting.external_3dgs import load_3dgs_ply, opacity_to_alpha
 
@@ -111,6 +114,71 @@ def test_export_3dgs_gpis_variants_preserves_binary_ply(tmp_path: Path) -> None:
     assert np.allclose(filtered.vertices["f_rest_0"], [0.33])
 
 
+def test_evaluate_3dgs_variant_renders_writes_comparison(tmp_path: Path) -> None:
+    scene_dir = tmp_path / "real_scenes" / "toy"
+    write_tiny_prepared_scene(scene_dir)
+    manifest_path = tmp_path / "variants" / "paper_gate_3dgs_variant_manifest.csv"
+    manifest_path.parent.mkdir()
+    pd.DataFrame(
+        [
+            {
+                "variant": "baseline",
+                "variant_kind": "baseline",
+                "model_dir": str(tmp_path / "variants" / "paper_gate_baseline"),
+                "point_cloud_path": str(tmp_path / "variants" / "paper_gate_baseline" / "point_cloud" / "iteration_7" / "point_cloud.ply"),
+                "retained_count": 4,
+                "retention_fraction": 1.0,
+                "gate_threshold": np.nan,
+                "opacity_scaled": False,
+                "gate_min": 0.1,
+                "gate_max": 0.9,
+                "gate_mean": 0.5,
+            },
+            {
+                "variant": "gate_scaled",
+                "variant_kind": "gate_scaled",
+                "model_dir": str(tmp_path / "variants" / "paper_gate_gate_scaled"),
+                "point_cloud_path": str(tmp_path / "variants" / "paper_gate_gate_scaled" / "point_cloud" / "iteration_7" / "point_cloud.ply"),
+                "retained_count": 4,
+                "retention_fraction": 1.0,
+                "gate_threshold": np.nan,
+                "opacity_scaled": True,
+                "gate_min": 0.1,
+                "gate_max": 0.9,
+                "gate_mean": 0.5,
+            },
+        ]
+    ).to_csv(manifest_path, index=False)
+    predictions_root = tmp_path / "rendered"
+    for variant in ("baseline", "gate_scaled"):
+        variant_dir = predictions_root / variant / "test" / "ours_7" / "renders"
+        variant_dir.mkdir(parents=True)
+        write_image(variant_dir / "frame_000001.png", value=80)
+
+    evaluate_3dgs_variant_renders_main(
+        [
+            "--manifest-path",
+            str(manifest_path),
+            "--scene-dir",
+            str(scene_dir),
+            "--predictions-root",
+            str(predictions_root),
+            "--prediction-subdir",
+            "test/ours_7/renders",
+            "--output-dir",
+            str(tmp_path / "evaluations"),
+            "--method-name",
+            "paper_gate",
+        ]
+    )
+
+    comparison = pd.read_csv(tmp_path / "evaluations" / "paper_gate_3dgs_render_comparison.csv")
+    assert comparison["variant"].tolist() == ["baseline", "gate_scaled"]
+    assert comparison["mean_ssim"].tolist() == [1.0, 1.0]
+    assert comparison["image_count"].tolist() == [1, 1]
+    assert (tmp_path / "evaluations" / "paper_gate_3dgs_render_evaluation_report.md").exists()
+
+
 def write_tiny_3dgs_ply(path: Path) -> None:
     rows = [
         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.2, 0.3, -2.0, -4.0, -4.0, -4.0, 1.0, 0.0, 0.0, 0.0],
@@ -175,3 +243,31 @@ def write_tiny_binary_3dgs_ply(path: Path) -> None:
         ]
     ).encode("ascii")
     path.write_bytes(header + rows.tobytes())
+
+
+def write_tiny_prepared_scene(scene_dir: Path) -> None:
+    (scene_dir / "images").mkdir(parents=True)
+    write_image(scene_dir / "images" / "frame_000001.png", value=80)
+    (scene_dir / "real_scene.json").write_text(
+        '{"scene":"toy","dataset":"fixture","source_format":"fixture"}\n',
+        encoding="utf-8",
+    )
+    (scene_dir / "cameras.json").write_text(
+        "\n".join(
+            [
+                "{",
+                '  "frames": [',
+                '    {"index": 1, "file_name": "frame_000001.png", "image_path": "images/frame_000001.png"}',
+                "  ]",
+                "}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (scene_dir / "splits.json").write_text('{"train": [], "test": [0]}\n', encoding="utf-8")
+
+
+def write_image(path: Path, *, value: int) -> None:
+    data = np.full((5, 7, 3), value, dtype=np.uint8)
+    Image.fromarray(data, mode="RGB").save(path)
