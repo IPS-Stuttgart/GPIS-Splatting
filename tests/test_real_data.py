@@ -1208,11 +1208,16 @@ def test_diagnose_tanks_temples_gpis_field_scores_cli(tmp_path: Path) -> None:
     assert calibration_status["gate_count"] == 5
     assert calibration_status["gate_scored_count"] == 3
     assert calibration_status["gate_missing_count"] == 2
+    assert np.isclose(calibration_status["gate_scored_fraction"], 0.6)
+    assert np.isclose(calibration_status["gate_missing_fraction"], 0.4)
+    assert calibration_status["missing_gate_value"] == 0.25
     assert (scene_dir / "evaluations" / "toy_calibrated_calibrated_confidence.npz").exists()
     calibrated_gate = np.load(scene_dir / "evaluations" / "toy_calibrated_gate_0p05.npz")
     assert calibrated_gate["gate"].shape == (5,)
     assert calibrated_gate["scored_mask"].tolist() == [True, True, True, False, False]
     assert np.allclose(calibrated_gate["gate"][3:], 0.25)
+    assert np.isclose(float(calibrated_gate["scored_fraction"]), 0.6)
+    assert np.isclose(float(calibrated_gate["missing_fraction"]), 0.4)
     assert calibrated_gate["gate"].min() >= 0.0
     assert calibrated_gate["gate"].max() <= 1.0
     assert (scene_dir / "evaluations" / "toy_calibrated_calibration_report.md").exists()

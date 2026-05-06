@@ -45,7 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--regularization", type=float, default=1e-3)
     parser.add_argument("--num-bins", type=int, default=10, help="ECE bin count. Must be positive.")
     parser.add_argument("--gate-count", type=int, default=None, help="Optional full splat count for gate-compatible NPZ exports.")
-    parser.add_argument("--missing-gate-value", type=float, default=0.0, help="Gate value for unscored splat indices when --gate-count is used.")
+    parser.add_argument(
+        "--missing-gate-value",
+        type=float,
+        default=0.0,
+        help="Gate value for unscored splat indices when --gate-count is used. Use 1.0 to preserve unscored trained 3DGS Gaussians during photometric evaluation.",
+    )
     return parser
 
 
