@@ -77,6 +77,20 @@ on:  # yamllint disable-line rule:truthy
         required: false
         type: string
         default: ""
+      render_name_map_path:
+        description: Optional render_name_map.csv from export_prepared_scene_to_colmap_3dgs for mapping standard 3DGS render names before evaluation.
+        required: false
+        type: string
+        default: ""
+      render_mapping_link_mode:
+        description: How mapped render images are materialized when render_name_map_path is set.
+        required: true
+        type: choice
+        default: copy
+        options:
+          - copy
+          - hardlink
+          - symlink
       render_split:
         description: Prepared-scene split to evaluate.
         required: true
@@ -131,6 +145,8 @@ jobs:
       RENDER_COMMAND_TEMPLATE: ${{ inputs.render_command_template }}
       RENDERED_PREDICTIONS_ROOT: ${{ inputs.rendered_predictions_root }}
       PREDICTION_SUBDIR: ${{ inputs.prediction_subdir }}
+      RENDER_NAME_MAP_PATH: ${{ inputs.render_name_map_path }}
+      RENDER_MAPPING_LINK_MODE: ${{ inputs.render_mapping_link_mode }}
       RENDER_SPLIT: ${{ inputs.render_split }}
       COMPUTE_LPIPS: ${{ inputs.compute_lpips }}
       REQUIRE_ALL_IMAGES: ${{ inputs.require_all_images }}
@@ -287,6 +303,64 @@ jobs:
             echo "EVALUATE_RENDERED_VARIANTS=false" >> "${GITHUB_ENV}"
           fi
 
+      - name: Map standard 3DGS render names to prepared scene
+        if: ${{ inputs.render_name_map_path != '' }}
+        shell: bash
+        run: |
+          if [ "${EVALUATE_RENDERED_VARIANTS}" != "true" ]; then
+            echo "No render outputs were selected; skipping render-name mapping."
+            exit 0
+          fi
+          python - <<'PY' >> "${GITHUB_ENV}"
+          from __future__ import annotations
+
+          import os
+          from pathlib import Path
+
+          import pandas as pd
+
+          from gpis_splatting.colmap_render_mapping import map_3dgs_renders_to_prepared_scene
+          from gpis_splatting.external_3dgs import resolve_3dgs_variant_prediction_dir
+
+          scene_dir = Path(os.environ["SCENE_DIR"])
+          raw_map_path = Path(os.environ["RENDER_NAME_MAP_PATH"])
+          map_path = raw_map_path if raw_map_path.is_absolute() else raw_map_path
+          if not map_path.exists():
+              map_path = scene_dir / raw_map_path
+          if not map_path.is_file():
+              raise SystemExit(f"Render-name map does not exist: {map_path}")
+
+          manifest = pd.read_csv(os.environ["MANIFEST_PATH"])
+          predictions_base = Path(os.environ["PREDICTIONS_ROOT"])
+          method_name = os.environ["METHOD_NAME"]
+          prediction_subdir = os.environ["PREDICTION_SUBDIR"]
+          mapped_root = scene_dir / "renders" / f"{method_name}_mapped_variants"
+          mapped_root.mkdir(parents=True, exist_ok=True)
+
+          for row in manifest.itertuples(index=False):
+              variant = str(row.variant)
+              raw_dir = resolve_3dgs_variant_prediction_dir(
+                  predictions_base,
+                  manifest_row=row,
+                  method_name=method_name,
+                  prediction_subdir=prediction_subdir,
+              )
+              if raw_dir is None:
+                  raise SystemExit(f"Could not find rendered prediction directory for variant {variant!r} under {predictions_base}")
+              map_3dgs_renders_to_prepared_scene(
+                  map_path=map_path,
+                  renders_dir=raw_dir,
+                  output_dir=mapped_root / variant,
+                  link_mode=os.environ["RENDER_MAPPING_LINK_MODE"],
+                  require_all=os.environ["REQUIRE_ALL_IMAGES"].lower() == "true",
+                  overwrite=True,
+              )
+
+          print(f"PREDICTIONS_ROOT={mapped_root}")
+          print("PREDICTION_SUBDIR=")
+          print(f"MAPPED_RENDER_NAME_MAP_PATH={map_path}")
+          PY
+
       - name: Evaluate trained 3DGS variant renders
         shell: bash
         run: |
@@ -322,6 +396,7 @@ jobs:
             echo "- Manifest: \`${MANIFEST_PATH}\`"
             echo "- Calibrated gate: \`${CALIBRATED_GATE_PATH}\`"
             echo "- Render evaluation enabled: \`${EVALUATE_RENDERED_VARIANTS:-false}\`"
+            echo "- Render-name map: \`${MAPPED_RENDER_NAME_MAP_PATH:-${RENDER_NAME_MAP_PATH:-none}}\`"
             if [ -f "${EVALUATIONS_DIR}/${METHOD_NAME}_3dgs_render_evaluation_report.md" ]; then
               echo
               cat "${EVALUATIONS_DIR}/${METHOD_NAME}_3dgs_render_evaluation_report.md"
@@ -350,6 +425,9 @@ jobs:
             real_scenes/${{ env.PREPARED_SCENE }}/evaluations/${{ env.METHOD_NAME }}_3dgs_render_*.csv
             real_scenes/${{ env.PREPARED_SCENE }}/evaluations/${{ env.METHOD_NAME }}_3dgs_render_*.json
             real_scenes/${{ env.PREPARED_SCENE }}/evaluations/${{ env.METHOD_NAME }}_3dgs_render_*.md
+            real_scenes/${{ env.PREPARED_SCENE }}/renders/${{ env.METHOD_NAME }}_mapped_variants/**/mapped_render_images*.csv
+            real_scenes/${{ env.PREPARED_SCENE }}/renders/${{ env.METHOD_NAME }}_mapped_variants/**/mapped_render_images*.json
+            real_scenes/${{ env.PREPARED_SCENE }}/renders/${{ env.METHOD_NAME }}_mapped_variants/**/mapped_render_images*.md
             real_scenes/${{ env.PREPARED_SCENE }}/trained_3dgs_variants/${{ env.METHOD_NAME }}/${{ env.METHOD_NAME }}_3dgs_variant_manifest.csv
             real_scenes/${{ env.PREPARED_SCENE }}/trained_3dgs_variants/${{ env.METHOD_NAME }}/${{ env.METHOD_NAME }}_3dgs_variant_status.json
             real_scenes/${{ env.PREPARED_SCENE }}/trained_3dgs_variants/${{ env.METHOD_NAME }}/${{ env.METHOD_NAME }}_3dgs_variant_report.md

@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+from gpis_splatting.colmap_render_mapping import write_render_name_map
 from gpis_splatting.real_bootstrap import SparsePointCloud, load_sparse_point_cloud, subsample_point_cloud
 from gpis_splatting.real_scene import load_prepared_scene, resolve_scene_image_path
 from gpis_splatting.serialization import write_json
@@ -53,9 +54,11 @@ def export_prepared_scene_to_colmap_3dgs(
     cameras_path = sparse_dir / "cameras.txt"
     images_path = sparse_dir / "images.txt"
     points_path_out = sparse_dir / "points3D.txt"
+    render_name_map_path = out_dir / "render_name_map.csv"
     write_colmap_cameras(cameras_path, camera_rows)
     write_colmap_images(images_path, export_frames, frame_camera_ids)
     write_colmap_points(points_path_out, cloud)
+    write_render_name_map(render_name_map_path, export_frames, split=split)
 
     status_path = out_dir / "export_status.json"
     report_path = out_dir / "export_report.md"
@@ -79,6 +82,7 @@ def export_prepared_scene_to_colmap_3dgs(
         "cameras_path": str(cameras_path),
         "images_path": str(images_path),
         "points3d_path": str(points_path_out),
+        "render_name_map_path": str(render_name_map_path),
     }
     write_json(status_path, status)
     report_path.write_text(format_export_report(status), encoding="utf-8")
@@ -354,6 +358,7 @@ def format_export_report(status: dict[str, Any]) -> str:
         f"- Cameras: `{status['camera_count']}`",
         f"- Points: `{status['point_count']}` from `{status['point_source']}`",
         f"- Output: `{status['output_dir']}`",
+        f"- Render-name map: `{status['render_name_map_path']}`",
         "",
         "The directory is laid out as `images/` plus `sparse/0/{cameras.txt,images.txt,points3D.txt}` for standard 3DGS training tools.",
     ]

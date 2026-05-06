@@ -39,6 +39,7 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Wrote {result['status']['cameras_path']}")
     print(f"Wrote {result['status']['images_path']}")
     print(f"Wrote {result['status']['points3d_path']}")
+    print(f"Wrote {result['status']['render_name_map_path']}")
     print(f"Wrote {result['status_path']}")
     print(f"Wrote {result['report_path']}")
     print(f"frames: {result['status']['frame_count']}")
