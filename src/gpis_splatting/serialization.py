@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import torch
+
+if TYPE_CHECKING:
+    import torch
 
 
 def write_json(path: str | Path, data: dict[str, Any]) -> None:
@@ -18,4 +20,3 @@ def read_json(path: str | Path) -> dict[str, Any]:
 
 def tensors_to_numpy(data: dict[str, torch.Tensor]) -> dict[str, np.ndarray]:
     return {key: value.detach().cpu().numpy() for key, value in data.items()}
-
