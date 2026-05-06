@@ -9,6 +9,7 @@ import pandas as pd
 import torch
 
 from gpis_splatting.real_bootstrap import binary_ply_vertex_dtype, parse_ply_header, split_ply_header
+from gpis_splatting.real_benchmark import evaluate_real_renders
 from gpis_splatting.real_geometry import format_threshold_label
 from gpis_splatting.real_splat_filtering import gate_multiplier
 from gpis_splatting.serialization import write_json
@@ -270,6 +271,113 @@ def export_3dgs_gpis_variants(
     return {"manifest_path": manifest_path, "status_path": status_path, "report_path": report_path, "manifest": manifest, "status": status}
 
 
+def evaluate_3dgs_variant_renders(
+    *,
+    manifest_path: str | Path,
+    scene_dir: str | Path,
+    predictions_root: str | Path,
+    output_dir: str | Path,
+    method_name: str = "trained_3dgs",
+    split: str = "test",
+    prediction_subdir: str = "",
+    compute_lpips: bool = False,
+    require_all_images: bool = True,
+    require_all_variants: bool = True,
+    benchmark_target: str | Path | None = None,
+) -> dict[str, Any]:
+    manifest_file = Path(manifest_path)
+    manifest = pd.read_csv(manifest_file)
+    validate_render_evaluation_config(manifest=manifest, method_name=method_name)
+    scene_root = Path(scene_dir)
+    predictions_base = Path(predictions_root)
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    rows: list[dict[str, Any]] = []
+    missing_variants: list[str] = []
+    variant_statuses: list[dict[str, Any]] = []
+    for row in manifest.itertuples(index=False):
+        variant = str(row.variant)
+        predictions_dir = resolve_3dgs_variant_prediction_dir(predictions_base, manifest_row=row, method_name=method_name, prediction_subdir=prediction_subdir)
+        if predictions_dir is None:
+            missing_variants.append(variant)
+            if require_all_variants:
+                continue
+            rows.append(render_missing_variant_row(row=row, variant=variant))
+            continue
+
+        variant_method = f"{method_name}_{variant}"
+        status = evaluate_real_renders(
+            scene_dir=scene_root,
+            predictions_dir=predictions_dir,
+            output_dir=out_dir,
+            method_name=variant_method,
+            split=split,
+            benchmark_target=benchmark_target,
+            compute_lpips=compute_lpips,
+            require_all=require_all_images,
+        )
+        summary = status["summary"]
+        rows.append(
+            {
+                "method": method_name,
+                "variant": variant,
+                "variant_kind": row.variant_kind,
+                "predictions_dir": str(predictions_dir),
+                "model_dir": row.model_dir,
+                "point_cloud_path": row.point_cloud_path,
+                "retained_count": int(row.retained_count),
+                "retention_fraction": float(row.retention_fraction),
+                "gate_threshold": None if pd.isna(row.gate_threshold) else float(row.gate_threshold),
+                "opacity_scaled": parse_bool_like(row.opacity_scaled),
+                "gate_min": None if pd.isna(row.gate_min) else float(row.gate_min),
+                "gate_max": None if pd.isna(row.gate_max) else float(row.gate_max),
+                "gate_mean": None if pd.isna(row.gate_mean) else float(row.gate_mean),
+                "split": split,
+                "image_count": int(summary["image_count"]),
+                "missing_count": int(summary["missing_count"]),
+                "mean_psnr": float(summary["mean_psnr"]),
+                "mean_ssim": float(summary["mean_ssim"]),
+                "mean_lpips_vgg": summary.get("mean_lpips_vgg"),
+                "metrics_path": status["metrics_path"],
+                "summary_path": status["summary_path"],
+            }
+        )
+        variant_statuses.append({"variant": variant, "predictions_dir": str(predictions_dir), "render_status": status})
+
+    if missing_variants and require_all_variants:
+        raise FileNotFoundError(f"Missing rendered prediction directories for variants: {missing_variants}.")
+    if not rows:
+        raise ValueError("No rendered 3DGS variants were evaluated.")
+
+    comparison = pd.DataFrame(rows)
+    comparison_path = out_dir / f"{method_name}_3dgs_render_comparison.csv"
+    status_path = out_dir / f"{method_name}_3dgs_render_evaluation_status.json"
+    report_path = out_dir / f"{method_name}_3dgs_render_evaluation_report.md"
+    comparison.to_csv(comparison_path, index=False)
+    status = {
+        "schema_version": 1,
+        "method": method_name,
+        "manifest_path": str(manifest_file),
+        "scene_dir": str(scene_root),
+        "predictions_root": str(predictions_base),
+        "output_dir": str(out_dir),
+        "split": split,
+        "prediction_subdir": prediction_subdir,
+        "compute_lpips": compute_lpips,
+        "require_all_images": require_all_images,
+        "require_all_variants": require_all_variants,
+        "missing_variants": missing_variants,
+        "variant_count": int(len(comparison)),
+        "comparison_path": str(comparison_path),
+        "report_path": str(report_path),
+        "variants": variant_statuses,
+    }
+    write_json(status_path, status)
+    report_path.write_text(format_3dgs_render_evaluation_report(status, comparison), encoding="utf-8")
+    return {"comparison_path": comparison_path, "status_path": status_path, "report_path": report_path, "comparison": comparison, "status": status}
+
+
 def write_variant(
     *,
     ply: GaussianPly,
@@ -305,6 +413,93 @@ def write_variant(
         "gate_min": float(selected_gates.min()) if selected_gates.size else None,
         "gate_max": float(selected_gates.max()) if selected_gates.size else None,
         "gate_mean": float(selected_gates.mean()) if selected_gates.size else None,
+    }
+
+
+def validate_render_evaluation_config(*, manifest: pd.DataFrame, method_name: str) -> None:
+    required = {
+        "variant",
+        "variant_kind",
+        "model_dir",
+        "point_cloud_path",
+        "retained_count",
+        "retention_fraction",
+        "gate_threshold",
+        "opacity_scaled",
+        "gate_min",
+        "gate_max",
+        "gate_mean",
+    }
+    missing = sorted(required - set(manifest.columns))
+    if missing:
+        raise ValueError(f"3DGS variant manifest is missing columns: {', '.join(missing)}.")
+    if manifest.empty:
+        raise ValueError("3DGS variant manifest is empty.")
+    if not method_name:
+        raise ValueError("method_name must be non-empty.")
+
+
+def resolve_3dgs_variant_prediction_dir(predictions_root: Path, *, manifest_row: Any, method_name: str, prediction_subdir: str = "") -> Path | None:
+    variant = str(manifest_row.variant)
+    model_dir = Path(str(manifest_row.model_dir))
+    variant_roots = [
+        predictions_root / variant,
+        predictions_root / f"{method_name}_{variant}",
+        predictions_root / model_dir.name,
+    ]
+    if predictions_root.name in {variant, f"{method_name}_{variant}", model_dir.name}:
+        variant_roots.insert(0, predictions_root)
+    candidates = apply_prediction_subdir(variant_roots, prediction_subdir=prediction_subdir)
+    for candidate in unique_prediction_dirs(candidates):
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def apply_prediction_subdir(variant_roots: list[Path], *, prediction_subdir: str) -> list[Path]:
+    subdir = prediction_subdir.strip()
+    if not subdir or subdir == ".":
+        return variant_roots
+    subpath = Path(subdir)
+    if subpath.is_absolute():
+        raise ValueError("prediction_subdir must be relative.")
+    return [root / subpath for root in variant_roots]
+
+
+def unique_prediction_dirs(paths: list[Path]) -> list[Path]:
+    seen = set()
+    unique = []
+    for path in paths:
+        key = path.resolve(strict=False)
+        if key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return unique
+
+
+def render_missing_variant_row(*, row: Any, variant: str) -> dict[str, Any]:
+    return {
+        "method": None,
+        "variant": variant,
+        "variant_kind": row.variant_kind,
+        "predictions_dir": None,
+        "model_dir": row.model_dir,
+        "point_cloud_path": row.point_cloud_path,
+        "retained_count": int(row.retained_count),
+        "retention_fraction": float(row.retention_fraction),
+        "gate_threshold": None if pd.isna(row.gate_threshold) else float(row.gate_threshold),
+        "opacity_scaled": parse_bool_like(row.opacity_scaled),
+        "gate_min": None if pd.isna(row.gate_min) else float(row.gate_min),
+        "gate_max": None if pd.isna(row.gate_max) else float(row.gate_max),
+        "gate_mean": None if pd.isna(row.gate_mean) else float(row.gate_mean),
+        "split": None,
+        "image_count": 0,
+        "missing_count": None,
+        "mean_psnr": None,
+        "mean_ssim": None,
+        "mean_lpips_vgg": None,
+        "metrics_path": None,
+        "summary_path": None,
     }
 
 
@@ -412,6 +607,54 @@ def format_3dgs_variant_report(status: dict[str, Any], manifest: pd.DataFrame) -
     if not manifest.empty:
         lines.extend(["", "## Variants", "", format_manifest_table(manifest)])
     return "\n".join(lines) + "\n"
+
+
+def format_3dgs_render_evaluation_report(status: dict[str, Any], comparison: pd.DataFrame) -> str:
+    lines = [
+        "# GPIS-Gated 3DGS Render Evaluation",
+        "",
+        f"- Method: `{status['method']}`",
+        f"- Manifest: `{status['manifest_path']}`",
+        f"- Scene: `{status['scene_dir']}`",
+        f"- Predictions root: `{status['predictions_root']}`",
+        f"- Prediction subdir: `{status['prediction_subdir'] or '.'}`",
+        f"- Split: `{status['split']}`",
+        f"- Variants evaluated: `{status['variant_count']}`",
+        f"- Missing variants: `{len(status['missing_variants'])}`",
+        f"- Comparison CSV: `{status['comparison_path']}`",
+    ]
+    if status["missing_variants"]:
+        missing = ", ".join(f"`{variant}`" for variant in status["missing_variants"])
+        lines.extend(["", f"Missing rendered prediction directories: {missing}"])
+    if not comparison.empty:
+        lines.extend(["", "## Render Metrics", "", format_render_comparison_table(comparison)])
+    return "\n".join(lines) + "\n"
+
+
+def format_render_comparison_table(comparison: pd.DataFrame) -> str:
+    lines = [
+        "| variant | kind | retained | retention | opacity_scaled | psnr | ssim | lpips_vgg | images | missing |",
+        "| --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for row in comparison.itertuples(index=False):
+        lines.append(
+            f"| `{row.variant}` | `{row.variant_kind}` | {row.retained_count} | {row.retention_fraction:.6g} | "
+            f"`{row.opacity_scaled}` | {format_optional_number(row.mean_psnr)} | {format_optional_number(row.mean_ssim)} | "
+            f"{format_optional_number(row.mean_lpips_vgg)} | {row.image_count} | {format_optional_number(row.missing_count)} |"
+        )
+    return "\n".join(lines)
+
+
+def format_optional_number(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return "n/a"
+    return f"{float(value):.6g}"
+
+
+def parse_bool_like(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.lower() in {"true", "1", "yes", "y"}
+    return bool(value)
 
 
 def format_manifest_table(manifest: pd.DataFrame) -> str:

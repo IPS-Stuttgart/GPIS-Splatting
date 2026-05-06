@@ -391,6 +391,26 @@ Each exported variant is written as `model_dir/point_cloud/iteration_<n>/point_c
 Render those model directories with the standard 3DGS renderer, then pass the predictions to `evaluate_real_renders` for PSNR/SSIM and
 optional LPIPS.
 
+For a self-hosted, artifact-producing run, use the **Trained 3DGS Photometric Evaluation** workflow. It assumes the prepared real-scene
+directory, GPIS model, and trained 3DGS `point_cloud.ply` already exist on the self-hosted runner. The workflow preserves untracked
+runner files during checkout, converts the trained PLY, scores/calibrates all Gaussians, exports renderable variants, and can either:
+
+- run a renderer command template once per variant; or
+- evaluate an existing root of rendered variant directories.
+
+The renderer template may use `{model_dir}`, `{output_dir}`, `{scene_dir}`, `{variant}`, `{iteration}`, and `{point_cloud_path}`
+placeholders. After rendering, the workflow writes one comparison table with PSNR/SSIM/optional LPIPS:
+
+```powershell
+evaluate_3dgs_variant_renders `
+  --manifest-path real_scenes\barn_selfhosted_m25000_t2500_s12\trained_3dgs_variants\trained_3dgs\trained_3dgs_3dgs_variant_manifest.csv `
+  --scene barn_selfhosted_m25000_t2500_s12 `
+  --predictions-root real_scenes\barn_selfhosted_m25000_t2500_s12\renders\trained_3dgs_variants `
+  --prediction-subdir test\ours_30000\renders `
+  --method-name trained_3dgs `
+  --split test
+```
+
 Sweep GPIS pseudo-SDF construction and model hyperparameters against those gate-quality diagnostics:
 
 ```powershell

@@ -15,6 +15,7 @@ on: # yamllint disable-line rule:truthy
       - "docs/**"
       - ".github/workflows/gpis-splatting-ci.yml"
       - ".github/workflows/calibrated-confidence.yml"
+      - ".github/workflows/trained-3dgs-photometric-evaluation.yml"
   pull_request:
     branches:
       - main
@@ -28,6 +29,7 @@ on: # yamllint disable-line rule:truthy
       - "docs/**"
       - ".github/workflows/gpis-splatting-ci.yml"
       - ".github/workflows/calibrated-confidence.yml"
+      - ".github/workflows/trained-3dgs-photometric-evaluation.yml"
   workflow_dispatch:
 
 permissions:
@@ -208,6 +210,9 @@ jobs:
           run_tanks_temples_hard_negative_calibration --help > /dev/null
           run_tanks_temples_calibrated_splat_filtering --help > /dev/null
           run_tanks_temples_calibrated_confidence --help > /dev/null
+          convert_3dgs_ply_to_splats --help > /dev/null
+          export_3dgs_gpis_variants --help > /dev/null
+          evaluate_3dgs_variant_renders --help > /dev/null
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v7
