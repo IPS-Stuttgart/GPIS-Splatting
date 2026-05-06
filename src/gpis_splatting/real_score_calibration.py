@@ -228,6 +228,8 @@ def run_gpis_splat_score_calibration(
     )
     scored_splat_count = int(np.unique(predictions["splat_index"].to_numpy(dtype=np.int64)).shape[0])
     gate_missing_count = 0 if gate_count is None else int(gate_count - scored_splat_count)
+    gate_scored_fraction = None if gate_count is None else float(scored_splat_count / gate_count)
+    gate_missing_fraction = None if gate_count is None else float(gate_missing_count / gate_count)
     status_path = out_dir / f"{prefix}_calibration_status.json"
     report_path = out_dir / f"{prefix}_calibration_report.md"
     summary.to_csv(summary_path, index=False)
@@ -264,6 +266,8 @@ def run_gpis_splat_score_calibration(
         "gate_count": gate_count,
         "gate_scored_count": scored_splat_count,
         "gate_missing_count": gate_missing_count,
+        "gate_scored_fraction": gate_scored_fraction,
+        "gate_missing_fraction": gate_missing_fraction,
         "missing_gate_value": missing_gate_value,
         "report_path": str(report_path),
         "best_by_threshold": best_by_threshold,
@@ -330,6 +334,8 @@ def write_gate_compatible_confidences(
             missing_gate_value=np.asarray(float(missing_gate_value), dtype=np.float64),
             scored_count=np.asarray(int(scored_splat_index.shape[0]), dtype=np.int64),
             missing_count=np.asarray(int(scored_mask.shape[0] - scored_mask.sum()), dtype=np.int64),
+            scored_fraction=np.asarray(float(scored_mask.mean()), dtype=np.float64),
+            missing_fraction=np.asarray(float(1.0 - scored_mask.mean()), dtype=np.float64),
         )
         gate_paths[label] = path
     return gate_paths
@@ -697,7 +703,11 @@ def format_calibration_report(status: dict[str, Any], summary: pd.DataFrame) -> 
         f"- Calibrated scores CSV: `{status['predictions_path']}`",
         f"- Confidence NPZ: `{status['confidence_path']}`",
         f"- Gate-compatible NPZs: `{len(status.get('gate_paths', {}))}`",
+        f"- Gate count: `{format_report_optional_int(status.get('gate_count'))}`",
+        f"- Gate scored entries: `{status.get('gate_scored_count', status['row_count'])}`",
         f"- Gate entries filled from missing scores: `{status.get('gate_missing_count', 0)}`",
+        f"- Gate scored fraction: `{format_report_optional_float(status.get('gate_scored_fraction'))}`",
+        f"- Missing gate fill value: `{status.get('missing_gate_value', 0.0)}`",
         "",
         "## Best Calibrators",
         "",
@@ -726,6 +736,18 @@ def format_summary_table(summary: pd.DataFrame) -> str:
             f"{row.ece:.6g} | {format_optional(row.auc)} | {format_optional(row.average_precision)} | {row.best_topk_fraction:.6g} | {row.best_f_score:.6g} |"
         )
     return "\n".join(lines)
+
+
+def format_report_optional_int(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    return str(int(value))
+
+
+def format_report_optional_float(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    return f"{float(value):.6g}"
 
 
 def default_calibration_prefix(path: Path) -> str:

@@ -44,6 +44,11 @@ on:  # yamllint disable-line rule:truthy
         required: true
         type: string
         default: "0.05"
+      missing_gate_value:
+        description: Gate value for trained Gaussians not scored by the GPIS field pass. Use 1.0 to preserve unscored Gaussians for fair photometric evaluation.
+        required: true
+        type: string
+        default: "1.0"
       gate_thresholds:
         description: Space-separated confidence thresholds for filtered 3DGS variants.
         required: true
@@ -139,6 +144,7 @@ jobs:
       MAX_GT_POINTS: ${{ inputs.max_gt_points }}
       THRESHOLDS: ${{ inputs.thresholds }}
       CALIBRATION_THRESHOLD: ${{ inputs.calibration_threshold }}
+      MISSING_GATE_VALUE: ${{ inputs.missing_gate_value }}
       GATE_THRESHOLDS: ${{ inputs.gate_thresholds }}
       ITERATION: ${{ inputs.iteration }}
       OPACITY_MODE: ${{ inputs.opacity_mode }}
@@ -241,7 +247,8 @@ jobs:
           python -m gpis_splatting.cli.calibrate_gpis_splat_scores \
             --field-scores-path "${FIELD_SCORES_PATH}" \
             --thresholds "${THRESHOLD_ARGS[@]}" \
-            --gate-count "${GAUSSIAN_COUNT}"
+            --gate-count "${GAUSSIAN_COUNT}" \
+            --missing-gate-value "${MISSING_GATE_VALUE}"
 
       - name: Export renderable GPIS-gated 3DGS variants
         run: |
@@ -395,6 +402,7 @@ jobs:
             echo "- Trained PLY: \`${TRAINED_PLY_PATH}\`"
             echo "- Manifest: \`${MANIFEST_PATH}\`"
             echo "- Calibrated gate: \`${CALIBRATED_GATE_PATH}\`"
+            echo "- Missing gate value: \`${MISSING_GATE_VALUE}\`"
             echo "- Render evaluation enabled: \`${EVALUATE_RENDERED_VARIANTS:-false}\`"
             echo "- Render-name map: \`${MAPPED_RENDER_NAME_MAP_PATH:-${RENDER_NAME_MAP_PATH:-none}}\`"
             if [ -f "${EVALUATIONS_DIR}/${METHOD_NAME}_3dgs_render_evaluation_report.md" ]; then
