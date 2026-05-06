@@ -10,6 +10,7 @@ from gpis_splatting.cli.convert_3dgs_ply_to_splats import main as convert_3dgs_p
 from gpis_splatting.cli.evaluate_3dgs_variant_renders import main as evaluate_3dgs_variant_renders_main
 from gpis_splatting.cli.export_3dgs_gpis_variants import main as export_3dgs_gpis_variants_main
 from gpis_splatting.external_3dgs import load_3dgs_ply, opacity_to_alpha
+from gpis_splatting.serialization import read_json
 
 
 def test_convert_3dgs_ply_to_internal_splats(tmp_path: Path) -> None:
@@ -112,6 +113,42 @@ def test_export_3dgs_gpis_variants_preserves_binary_ply(tmp_path: Path) -> None:
     assert filtered.vertex_count == 1
     assert np.allclose(filtered.vertices["x"], [1.0])
     assert np.allclose(filtered.vertices["f_rest_0"], [0.33])
+
+
+def test_export_3dgs_gpis_variants_copies_inferred_render_config(tmp_path: Path) -> None:
+    model_dir = tmp_path / "trained_model"
+    ply_path = model_dir / "point_cloud" / "iteration_7" / "point_cloud.ply"
+    ply_path.parent.mkdir(parents=True)
+    write_tiny_3dgs_ply(ply_path)
+    (model_dir / "cfg_args").write_text("Namespace(source_path='scene', model_path='model')\n", encoding="utf-8")
+    (model_dir / "cameras.json").write_text("{}\n", encoding="utf-8")
+    gate_path = tmp_path / "gate.npz"
+    np.savez_compressed(gate_path, gate=np.asarray([0.1, 0.3, 0.8, 0.9], dtype=np.float64))
+    output_dir = tmp_path / "variants"
+
+    export_3dgs_gpis_variants_main(
+        [
+            "--input-ply",
+            str(ply_path),
+            "--gate-path",
+            str(gate_path),
+            "--output-dir",
+            str(output_dir),
+            "--method-name",
+            "renderable_gate",
+            "--iteration",
+            "7",
+            "--gate-thresholds",
+            "0.5",
+        ]
+    )
+
+    status = read_json(output_dir / "renderable_gate_3dgs_variant_status.json")
+    assert status["render_config_template_model_dir"] == str(model_dir)
+    assert status["copied_render_config_files"] == ["cfg_args", "cameras.json"]
+    for variant in ("baseline", "gate_scaled", "gate_ge_0p5"):
+        assert (output_dir / f"renderable_gate_{variant}" / "cfg_args").read_text(encoding="utf-8").startswith("Namespace(")
+        assert (output_dir / f"renderable_gate_{variant}" / "cameras.json").exists()
 
 
 def test_evaluate_3dgs_variant_renders_writes_comparison(tmp_path: Path) -> None:
