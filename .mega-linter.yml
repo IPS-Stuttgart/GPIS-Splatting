@@ -1,6 +1,6 @@
 ---
-# Keep MegaLinter focused on checks that are useful before the prototype has
-# strict typing, spelling, security-scan baselines, and full style policy.
+# Keep MegaLinter focused on checks that are useful across these Python repos
+# before strict typing, spelling, and security-scan baselines are established.
 ENABLE_LINTERS:
   - ACTION_ACTIONLINT
   - MARKDOWN_MARKDOWNLINT
@@ -12,3 +12,4 @@ ENABLE_LINTERS:
 VALIDATE_ALL_CODEBASE: true
 PRINT_ALPACA: false
 SHOW_ELAPSED_TIME: true
+FLAVOR_SUGGESTIONS: false

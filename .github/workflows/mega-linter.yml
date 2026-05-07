@@ -1,12 +1,5 @@
 ---
-# MegaLinter GitHub Action configuration file
-# More info at https://megalinter.io
 name: MegaLinter
-
-permissions:
-  checks: write
-  pull-requests: write
-  contents: write
 
 on: # yamllint disable-line rule:truthy
   push:
@@ -17,37 +10,34 @@ on: # yamllint disable-line rule:truthy
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: read
+
 concurrency:
-  group: ${{ github.ref }}-${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+  megalinter:
     name: MegaLinter
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v6
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
           fetch-depth: 0
 
-      - name: MegaLinter
-        id: ml
+      - name: Run MegaLinter
         uses: oxsecurity/megalinter/flavors/python@v9.4.0
         env:
-          VALIDATE_ALL_CODEBASE: true
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Archive MegaLinter artifacts
+      - name: Upload MegaLinter reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
-          name: MegaLinter reports
+          name: megalinter-reports
           path: |
             megalinter-reports
             mega-linter.log
