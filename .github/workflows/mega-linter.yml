@@ -17,6 +17,11 @@ on: # yamllint disable-line rule:truthy
       - main
   workflow_dispatch:
 
+env:
+  APPLY_FIXES: all
+  APPLY_FIXES_EVENT: push
+  APPLY_FIXES_MODE: pull_request
+
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
@@ -43,7 +48,7 @@ jobs:
           VALIDATE_ALL_CODEBASE: true
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Archive MegaLinter artifacts
+      - name: Archive production artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -51,3 +56,38 @@ jobs:
           path: |
             megalinter-reports
             mega-linter.log
+
+      - name: Remove generated MegaLinter reports before PR creation
+        if: always()
+        run: sudo rm -rf megalinter-reports mega-linter.log
+
+      - name: Create Pull Request with applied fixes
+        id: cpr
+        if: github.ref == 'refs/heads/main' && steps.ml.outputs.has_updated_sources == 1 && (env.APPLY_FIXES_EVENT == 'all' || env.APPLY_FIXES_EVENT == github.event_name) && env.APPLY_FIXES_MODE == 'pull_request' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && !contains(github.event.head_commit.message, 'skip fix')
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+          commit-message: "[MegaLinter] Apply linters automatic fixes"
+          title: "[MegaLinter] Apply linters automatic fixes"
+          branch: megalinter-fixes
+          labels: bot
+          base: main
+
+      - name: Create PR output
+        if: github.ref == 'refs/heads/main' && steps.ml.outputs.has_updated_sources == 1 && (env.APPLY_FIXES_EVENT == 'all' || env.APPLY_FIXES_EVENT == github.event_name) && env.APPLY_FIXES_MODE == 'pull_request' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && !contains(github.event.head_commit.message, 'skip fix')
+        run: |
+          echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
+          echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"
+
+      - name: Prepare commit
+        if: steps.ml.outputs.has_updated_sources == 1 && (env.APPLY_FIXES_EVENT == 'all' || env.APPLY_FIXES_EVENT == github.event_name) && env.APPLY_FIXES_MODE == 'commit' && github.ref != 'refs/heads/main' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && !contains(github.event.head_commit.message, 'skip fix')
+        run: sudo chown -Rc "$UID" .git/
+
+      - name: Commit and push applied linter fixes
+        if: steps.ml.outputs.has_updated_sources == 1 && (env.APPLY_FIXES_EVENT == 'all' || env.APPLY_FIXES_EVENT == github.event_name) && env.APPLY_FIXES_MODE == 'commit' && github.ref != 'refs/heads/main' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && !contains(github.event.head_commit.message, 'skip fix')
+        uses: stefanzweifel/git-auto-commit-action@v7
+        with:
+          branch: ${{ github.event.pull_request.head.ref || github.head_ref || github.ref }}
+          commit_message: "[MegaLinter] Apply linters fixes"
+          commit_user_name: megalinter-bot
+          commit_user_email: megalinter-bot@florianpfaff.de

@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import torch
 
 from gpis_splatting.real_scene import load_prepared_scene
 from gpis_splatting.serialization import write_json
-from gpis_splatting.splats import SplatCloud, save_splats
+
+if TYPE_CHECKING:
+    from gpis_splatting.splats import SplatCloud
 
 POINT_SOURCES = ("auto", "colmap", "ply")
 SAMPLE_TYPE_IDS = {
@@ -80,6 +81,8 @@ def bootstrap_real_gpis(
     config_path = scene_root / f"{output_prefix}_gpis_config.json"
     report_path = scene_root / f"{output_prefix}_bootstrap_report.json"
     np.savez_compressed(samples_path, **samples)
+    from gpis_splatting.splats import save_splats
+
     save_splats(str(splats_path), splats)
     config = {
         "schema_version": 1,
@@ -430,6 +433,10 @@ def build_ray_bootstrap_samples(
 
 
 def splats_from_point_cloud(cloud: SparsePointCloud, *, tau: float, sigma: float) -> SplatCloud:
+    import torch
+
+    from gpis_splatting.splats import SplatCloud
+
     centers = torch.from_numpy(cloud.points).to(dtype=torch.float64)
     colors = torch.from_numpy(np.clip(cloud.colors, 0.0, 1.0)).to(dtype=torch.float64)
     return SplatCloud(
