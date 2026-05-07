@@ -10,4 +10,5 @@ __all__ = [
     "real_pipeline",
     "real_workflow",
     "metrics",
+    "calibrated_confidence_api",
 ]
