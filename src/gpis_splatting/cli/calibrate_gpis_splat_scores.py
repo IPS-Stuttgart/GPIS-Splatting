@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from gpis_splatting.real_score_calibration import default_feature_sets, default_topk_fractions, run_gpis_splat_score_calibration
+from gpis_splatting.primary_confidence import default_feature_sets, default_topk_fractions, run_gpis_splat_score_calibration
 
 
 def resolve_field_scores_path(args: argparse.Namespace) -> Path:
@@ -34,6 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", default=None, help="Defaults to the field-score CSV directory.")
     parser.add_argument("--method-name", default=None, help="Output prefix. Also resolves <method>_gpis_field_scores.csv when no explicit field-score path is passed.")
     parser.add_argument("--thresholds", type=float, nargs="+", default=[0.02, 0.05, 0.1])
+    parser.add_argument("--primary-threshold", type=float, default=None, help="Threshold whose calibrated confidence becomes the primary_confidence column. Defaults to 0.05 when present, otherwise the first threshold.")
     parser.add_argument("--topk-fractions", type=float, nargs="+", default=list(default_topk_fractions()))
     parser.add_argument("--feature-sets", nargs="+", default=list(default_feature_sets()))
     parser.add_argument("--baseline-scores", nargs="+", default=None, help="score_* columns to compare through train-set min-max scaling.")
@@ -73,11 +74,18 @@ def main(argv: list[str] | None = None) -> None:
         num_bins=args.num_bins,
         gate_count=args.gate_count,
         missing_gate_value=args.missing_gate_value,
+        primary_threshold=args.primary_threshold,
     )
     print(f"Wrote {result['summary_path']}")
     print(f"Wrote {result['ranked_path']}")
     print(f"Wrote {result['predictions_path']}")
     print(f"Wrote {result['confidence_path']}")
+    if "model_bundle_path" in result:
+        print(f"Wrote {result['model_bundle_path']}")
+    if "primary_confidence_path" in result:
+        print(f"Wrote {result['primary_confidence_path']}")
+    if result.get("primary_gate_path") is not None:
+        print(f"Wrote {result['primary_gate_path']}")
     print(f"Wrote {result['status_path']}")
     print(f"Wrote {result['report_path']}")
     for row in result["status"]["best_by_threshold"]:
