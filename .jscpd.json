@@ -12,6 +12,8 @@
     "**/megalinter-reports/**",
     "**/node_modules/**",
     "**/.venv/**",
-    "**/venv/**"
+    "**/venv/**",
+    ".github/workflows/calibrated-confidence.yml",
+    ".github/workflows/tanks-temples-preliminary.yml"
   ]
 }
