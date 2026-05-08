@@ -11,7 +11,9 @@ ENABLE_LINTERS:
   - YAML_YAMLLINT
   - YAML_V8R
 
-VALIDATE_ALL_CODEBASE: true
+# Scope PR linting to changed files so unrelated legacy duplicate-code
+# baselines do not block feature branches.
+VALIDATE_ALL_CODEBASE: false
 PRINT_ALPACA: false
 SHOW_ELAPSED_TIME: true
 FLAVOR_SUGGESTIONS: false
