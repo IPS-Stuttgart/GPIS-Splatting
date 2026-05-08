@@ -1,0 +1,37 @@
+{
+  "name": "trained_3dgs_confidence",
+  "description": "External 3DGS interop workflow for converting a trained Gaussian PLY, scoring centers with GPIS, exporting GPIS-filtered variants, and evaluating rendered variants.",
+  "commands": [
+    {
+      "step": "export_scene",
+      "argv": ["export_prepared_scene_to_colmap_3dgs", "--scene", "<prepared_scene>", "--output-dir", "<3dgs_scene_dir>", "--split", "train", "--max-points", "100000"]
+    },
+    {
+      "step": "convert_trained_ply",
+      "argv": ["convert_3dgs_ply_to_splats", "--input-ply", "<trained_point_cloud.ply>", "--output-splats", "real_scenes/<prepared_scene>/trained_3dgs_splats.npz"]
+    },
+    {
+      "step": "score_trained_gaussians",
+      "argv": ["diagnose_tanks_temples_gpis_field_scores", "--scene", "<prepared_scene>", "--splats-path", "trained_3dgs_splats.npz", "--model-path", "<gpis_model.npz>", "--method-name", "trained_3dgs", "--max-pred-points", "0"]
+    },
+    {
+      "step": "calibrate",
+      "argv": ["calibrate_gpis_splat_scores", "--field-scores-path", "real_scenes/<prepared_scene>/evaluations/trained_3dgs_gpis_field_scores.csv", "--gate-count", "<gaussian_count>"]
+    },
+    {
+      "step": "export_variants",
+      "argv": ["export_3dgs_gpis_variants", "--input-ply", "<trained_point_cloud.ply>", "--gate-path", "real_scenes/<prepared_scene>/evaluations/trained_3dgs_calibrated_gate_0p05.npz", "--output-dir", "<variant_output_dir>", "--iteration", "30000"]
+    },
+    {
+      "step": "evaluate_rendered_variants",
+      "argv": ["evaluate_3dgs_variant_renders", "--manifest-path", "<variant_manifest.csv>", "--scene", "<prepared_scene>", "--predictions-root", "<rendered_variants_root>", "--prediction-subdir", "test/ours_30000/renders", "--method-name", "trained_3dgs", "--split", "test"]
+    }
+  ],
+  "expected_artifacts": [
+    "trained_3dgs_splats.npz",
+    "trained_3dgs_gpis_field_scores.csv",
+    "trained_3dgs_calibrated_gate_0p05.npz",
+    "*_3dgs_variant_manifest.csv",
+    "*_variant_render_summary.csv"
+  ]
+}
