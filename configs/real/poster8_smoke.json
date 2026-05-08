@@ -1,0 +1,25 @@
+{
+  "name": "poster8_smoke",
+  "description": "Laptop-scale Nerfstudio poster real-data smoke run with plain-vs-gated rendering and a small parameter sweep.",
+  "commands": [
+    {
+      "step": "real_smoke_evaluation",
+      "argv": [
+        "run_real_evaluation",
+        "--scene", "poster8_smoke",
+        "--max-download-images", "24",
+        "--max-points", "800",
+        "--max-train-points", "600",
+        "--max-frames", "4",
+        "--epsilons", "0.08", "0.16", "0.24",
+        "--gate-floors", "0.0", "0.25",
+        "--splat-sigmas", "0.015", "0.025", "0.04"
+      ]
+    }
+  ],
+  "expected_artifacts": [
+    "real_evaluation_comparison.csv",
+    "real_evaluation_status.json",
+    "real_evaluation_report.md"
+  ]
+}

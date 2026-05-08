@@ -1,0 +1,34 @@
+{
+  "name": "synthetic_quick",
+  "description": "Moderate synthetic benchmark across representative shapes.",
+  "ablation": {
+    "shapes": ["sphere", "torus", "non_star_convex"],
+    "feedback_iterations": [0, 1, 2],
+    "feedback_selectors": ["gate", "uncertainty", "uncertainty_diverse"],
+    "num_points": 120,
+    "noise_std": 0.035,
+    "grid_size": 18,
+    "lengthscale": 0.8,
+    "variance": 1.0,
+    "image_size": 72,
+    "num_splats": 240,
+    "epsilon": 0.09,
+    "view": "front",
+    "seed": 7,
+    "feedback_pseudo_points": 48,
+    "feedback_min_gate": 0.35
+  },
+  "targets": {
+    "max_rmse_sdf": 0.65,
+    "min_iou_inside": 0.15,
+    "min_psnr_gpis": 5.0
+  },
+  "expected_artifacts": [
+    "evaluation_config.json",
+    "evaluation_checks.csv",
+    "evaluation_status.json",
+    "evaluation_report.md",
+    "summary/ablation_summary.csv",
+    "summary/ablation_winners.csv"
+  ]
+}
