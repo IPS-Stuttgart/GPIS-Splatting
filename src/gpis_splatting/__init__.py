@@ -12,4 +12,5 @@ __all__ = [
     "metrics",
     "gpis_3dgs_regularization",
     "calibrated_confidence_api",
+    "depth_normal_supervision",
 ]
