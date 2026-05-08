@@ -13,7 +13,7 @@
     "**/node_modules/**",
     "**/.venv/**",
     "**/venv/**",
-    ".github/workflows/calibrated-confidence.yml",
-    ".github/workflows/tanks-temples-preliminary.yml"
+    ".github/workflows/**",
+    "**/.github/workflows/**"
   ]
 }
