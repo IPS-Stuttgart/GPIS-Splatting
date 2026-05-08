@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 import torch
 
 from gpis_splatting.cli.initialize_gpis_zero_level_splats import main as initialize_gpis_zero_level_splats_main
