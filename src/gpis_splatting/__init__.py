@@ -14,4 +14,5 @@ __all__ = [
     "gpis_initialization",
     "calibrated_confidence_api",
     "depth_normal_supervision",
+    "gsplat_adapter",
 ]
