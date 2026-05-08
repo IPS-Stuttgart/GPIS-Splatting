@@ -13,4 +13,5 @@ __all__ = [
     "gpis_3dgs_regularization",
     "gpis_initialization",
     "calibrated_confidence_api",
+    "depth_normal_supervision",
 ]
