@@ -5,6 +5,7 @@
   "minTokens": 100,
   "ignore": [
     "**/.git/**",
+    "**/.github/workflows/**",
     "**/.mypy_cache/**",
     "**/.pytest_cache/**",
     "**/.ruff_cache/**",
