@@ -1,0 +1,34 @@
+{
+  "name": "ignatius_geometry",
+  "description": "Tanks-and-Temples Ignatius geometry, GPIS field-score, and hard-negative confidence calibration workflow.",
+  "scene": "ignatius_tnt64",
+  "commands": [
+    {
+      "step": "download",
+      "argv": ["download_tanks_temples_scene", "--scene", "Ignatius", "--output-root", "real_scenes/_downloads", "--max-images", "64"]
+    },
+    {
+      "step": "prepare",
+      "argv": ["prepare_tanks_temples_scene", "--input-dir", "real_scenes/_downloads/tanks_temples/Ignatius", "--prepared-scene", "ignatius_tnt64", "--train-view-count", "12"]
+    },
+    {
+      "step": "gate_sweep",
+      "argv": ["run_tanks_temples_gate_sweep", "--scene", "ignatius_tnt64", "--splats-path", "real20k_sigma_0p04_splats.npz", "--model-path", "real20k_sigma_0p04_gpis_model.npz", "--thresholds", "0.02", "0.05", "0.1", "--gate-thresholds", "0.02", "0.05", "0.1", "0.2", "0.35", "0.5"]
+    },
+    {
+      "step": "field_scores",
+      "argv": ["diagnose_tanks_temples_gpis_field_scores", "--scene", "ignatius_tnt64", "--splats-path", "real20k_sigma_0p04_splats.npz", "--model-path", "real20k_sigma_0p04_gpis_model.npz", "--thresholds", "0.02", "0.05", "0.1", "--score-lambdas", "0.25", "0.5", "1.0"]
+    },
+    {
+      "step": "hard_negative_calibration",
+      "argv": ["run_tanks_temples_hard_negative_calibration", "--scene", "ignatius_tnt64", "--splats-path", "real20k_sigma_0p04_splats.npz", "--model-path", "real20k_sigma_0p04_gpis_model.npz", "--method-name", "ignatius_hard_negative_v1", "--thresholds", "0.02", "0.05", "0.1"]
+    }
+  ],
+  "expected_artifacts": [
+    "*_gate_sweep.csv",
+    "*_gpis_field_scores.csv",
+    "*_calibrated_confidence_model.json",
+    "*_primary_calibrated_confidence.csv",
+    "*_gate_*.npz"
+  ]
+}
