@@ -12,11 +12,13 @@ from gpis_splatting.evaluation import (
     preset_names,
     write_evaluation_artifacts,
 )
+from gpis_splatting.evaluation_config import load_evaluation_preset_file
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a reproducible GPIS-splatting evaluation preset.")
     parser.add_argument("--preset", choices=preset_names(), default="synthetic_quick")
+    parser.add_argument("--preset-config", default=None, help="Optional JSON preset file. When set, this overrides --preset.")
     parser.add_argument("--output-root", default="experiments")
     parser.add_argument("--experiment-name", default=None, help="Defaults to evaluation_<preset>.")
     parser.add_argument("--seed", type=int, default=None, help="Override the preset seed.")
@@ -36,8 +38,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
-    preset = get_evaluation_preset(args.preset)
-    experiment_name = args.experiment_name or f"evaluation_{args.preset}"
+    if args.preset_config:
+        preset = load_evaluation_preset_file(args.preset_config)
+        preset_name = str(preset.get("name") or Path(args.preset_config).stem)
+    else:
+        preset = get_evaluation_preset(args.preset)
+        preset_name = args.preset
+    experiment_name = args.experiment_name or f"evaluation_{preset_name}"
     ablation_root = Path(args.output_root) / experiment_name
 
     ablation_args = build_ablation_args(
@@ -58,7 +65,7 @@ def main(argv: list[str] | None = None) -> None:
 
     status = evaluate_ablation_artifacts(
         ablation_root=ablation_root,
-        preset_name=args.preset,
+        preset_name=preset_name,
         preset=preset,
         primary_metric=args.primary_metric,
         benchmark_target=args.benchmark_target,
@@ -67,7 +74,7 @@ def main(argv: list[str] | None = None) -> None:
         output_dir=ablation_root,
         status=status,
         preset=preset,
-        preset_name=args.preset,
+        preset_name=preset_name,
         ablation_args=ablation_args,
     )
     print(f"Wrote {paths['config']}")
