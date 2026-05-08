@@ -18,6 +18,11 @@ class SplatCloud:
     tau: Tensor
     sigma: Tensor
     is_surface: Tensor
+    normals: Tensor | None = None
+    scales: Tensor | None = None
+    rotations: Tensor | None = None
+    covariances: Tensor | None = None
+    confidence: Tensor | None = None
 
 
 def make_candidate_splats(
@@ -79,14 +84,18 @@ def make_candidate_splats(
 
 
 def save_splats(path: str, splats: SplatCloud) -> None:
-    np.savez_compressed(
-        path,
-        centers=splats.centers.detach().cpu().numpy(),
-        colors=splats.colors.detach().cpu().numpy(),
-        tau=splats.tau.detach().cpu().numpy(),
-        sigma=splats.sigma.detach().cpu().numpy(),
-        is_surface=splats.is_surface.detach().cpu().numpy(),
-    )
+    data = {
+        "centers": splats.centers.detach().cpu().numpy(),
+        "colors": splats.colors.detach().cpu().numpy(),
+        "tau": splats.tau.detach().cpu().numpy(),
+        "sigma": splats.sigma.detach().cpu().numpy(),
+        "is_surface": splats.is_surface.detach().cpu().numpy(),
+    }
+    for key in ("normals", "scales", "rotations", "covariances", "confidence"):
+        value = getattr(splats, key)
+        if value is not None:
+            data[key] = value.detach().cpu().numpy()
+    np.savez_compressed(path, **data)
 
 
 def load_splats(path: str) -> SplatCloud:
@@ -97,7 +106,18 @@ def load_splats(path: str) -> SplatCloud:
         tau=torch.from_numpy(npz["tau"]).to(dtype=torch.float64),
         sigma=torch.from_numpy(npz["sigma"]).to(dtype=torch.float64),
         is_surface=torch.from_numpy(npz["is_surface"]).to(dtype=torch.bool),
+        normals=_optional_splat_tensor(npz, "normals"),
+        scales=_optional_splat_tensor(npz, "scales"),
+        rotations=_optional_splat_tensor(npz, "rotations"),
+        covariances=_optional_splat_tensor(npz, "covariances"),
+        confidence=_optional_splat_tensor(npz, "confidence"),
     )
+
+
+def _optional_splat_tensor(npz, key: str):
+    if key not in npz.files:
+        return None
+    return torch.from_numpy(npz[key]).to(dtype=torch.float64)
 
 
 def gpis_gate_for_splats(
