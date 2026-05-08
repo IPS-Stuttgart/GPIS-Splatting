@@ -9,10 +9,10 @@ from gpis_splatting.evaluation import (
     build_ablation_args,
     evaluate_ablation_artifacts,
     get_evaluation_preset,
-    load_evaluation_preset_file,
     preset_names,
     write_evaluation_artifacts,
 )
+from gpis_splatting.evaluation_config import load_evaluation_preset_file
 
 
 def build_parser() -> argparse.ArgumentParser:
