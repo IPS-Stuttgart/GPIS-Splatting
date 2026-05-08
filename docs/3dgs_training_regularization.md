@@ -134,3 +134,46 @@ gpis_densification_gradient_boost=0.25
 ```
 
 The pruning hook defaults to requiring both low GPIS confidence and low opacity. That makes it a cleanup mechanism after the opacity loss has already pushed floaters down, rather than an aggressive geometry-only deleter.
+
+## Optimization-loop helper
+
+For trainers that already expose a scalar photometric loss and optimizer, use `GPIS3DGSOptimizationLoop` to make the GPIS term part of the same backward pass instead of manually adding hooks in several places:
+
+```python
+from gpis_splatting.gpis_3dgs_optimization import GPIS3DGSOptimizationLoop, GPIS3DGSOptimizationLoopConfig
+
+loop = GPIS3DGSOptimizationLoop(
+    gpis_regularizer,
+    GPIS3DGSOptimizationLoopConfig(
+        zero_grad_after_step=True,
+        apply_densification_boost=True,
+        apply_pruning=True,
+        prune_after_optimizer_step=True,
+    ),
+)
+
+# Inside the 3DGS training iteration, after the normal photometric/base loss exists:
+step = loop.step(
+    base_loss=loss,
+    gaussians=gaussians,
+    iteration=iteration,
+    optimizer=gaussians.optimizer,
+)
+
+for name, value in step.log_dict().items():
+    tb_writer.add_scalar(name, float(value.detach().cpu()), iteration)
+```
+
+For graphdeco-style trainers with custom densification order, split the helper into phases:
+
+```python
+step = loop.augment_loss(base_loss=loss, gaussians=gaussians, iteration=iteration)
+step.total_loss.backward()
+loop.after_backward(gaussians, step)        # optional GPIS densification-stat boost
+# run the trainer's usual densify/prune block here
+optimizer.step()
+optimizer.zero_grad(set_to_none=True)
+loop.after_optimizer_step(gaussians, step) # optional GPIS prune when configured after optimizer
+```
+
+This keeps the GPIS surface, opacity, and normal terms in the same autograd graph as the image-space loss while still allowing the external 3DGS implementation to own rendering, visibility, optimizer-state surgery, densification, and pruning semantics.
