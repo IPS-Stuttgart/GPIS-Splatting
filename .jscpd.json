@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/kucherenko/jscpd/master/schemas/jscpd-schema.json",
+  "threshold": 0,
+  "minLines": 25,
+  "minTokens": 100,
+  "ignore": [
+    "**/.git/**",
+    "**/.mypy_cache/**",
+    "**/.pytest_cache/**",
+    "**/.ruff_cache/**",
+    "**/__pycache__/**",
+    "**/megalinter-reports/**",
+    "**/node_modules/**",
+    "**/.venv/**",
+    "**/venv/**"
+  ]
+}
