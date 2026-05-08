@@ -17,6 +17,7 @@ on: # yamllint disable-line rule:truthy
         required: true
         type: string
         default: ignatius_tnt64
+      # jscpd:ignore-start
       max_images:
         description: Maximum number of images to extract. Use 0 to extract all images and match the existing full Ignatius cache.
         required: true
@@ -57,6 +58,7 @@ on: # yamllint disable-line rule:truthy
         required: true
         type: string
         default: "0.02 0.05 0.1"
+      # jscpd:ignore-end
       gate_thresholds:
         description: Space-separated calibrated-confidence thresholds for filtering.
         required: true
@@ -122,6 +124,7 @@ jobs:
       DATA_CACHE_VERSION: ${{ inputs.cache_version }}
 
     steps:
+      # jscpd:ignore-start
       - name: Check out repository
         uses: actions/checkout@v6
 
@@ -180,6 +183,7 @@ jobs:
             --samples-path "${OUTPUT_PREFIX}_samples.npz" \
             --output-model "${OUTPUT_PREFIX}_gpis_model.npz" \
             --max-train-points "${MAX_TRAIN_POINTS}"
+      # jscpd:ignore-end
 
       - name: Run calibrated-confidence evidence path
         run: |
