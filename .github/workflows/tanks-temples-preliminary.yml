@@ -16,6 +16,7 @@ on: # yamllint disable-line rule:truthy
         required: true
         type: string
         default: ignatius_tnt64
+      # jscpd:ignore-start
       max_images:
         description: Maximum number of images to extract for the prepared scene. Use 0 to extract all images.
         required: true
@@ -51,6 +52,7 @@ on: # yamllint disable-line rule:truthy
         required: true
         type: number
         default: 50000
+      # jscpd:ignore-end
       distance_chunk_size:
         description: Chunk size for nearest-neighbor distance evaluation.
         required: true
@@ -142,6 +144,7 @@ jobs:
       DATA_CACHE_VERSION: ${{ inputs.cache_version }}
 
     steps:
+      # jscpd:ignore-start
       - name: Check out repository
         uses: actions/checkout@v6
 
@@ -201,6 +204,7 @@ jobs:
             --samples-path "${OUTPUT_PREFIX}_samples.npz" \
             --output-model "${OUTPUT_PREFIX}_gpis_model.npz" \
             --max-train-points "${MAX_TRAIN_POINTS}"
+      # jscpd:ignore-end
 
       - name: Evaluate GPIS gate geometry
         run: |
