@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> None:
         raise ValueError("Pass either --scene-dir or --scene.")
     scene_dir = Path(args.scene_dir) if args.scene_dir is not None else Path(args.prepared_root) / args.scene
     output_dir = Path(args.output_dir) if args.output_dir is not None else scene_dir / "evaluations"
-    scale_dirs = parse_labeled_paths(args.scale_prediction_dir)
+    scale_dirs = parse_labeled_paths(args.scale_predictions_dir)
     aa_factors = () if args.disable_aa_roundtrip else tuple(args.aa_downsample_factor or DEFAULT_AA_DOWNSAMPLE_FACTORS)
     status = evaluate_render_consistency(
         scene_dir=scene_dir,
