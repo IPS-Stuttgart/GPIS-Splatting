@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from gpis_splatting.gsplat_fidelity_adapter import render_3dgs_ply_with_gsplat
+from gpis_splatting.gsplat_adapter import render_3dgs_ply_with_gsplat
 from gpis_splatting.real_benchmark import evaluate_real_renders, find_prediction_image, psnr_arrays, ssim_arrays
 from gpis_splatting.real_scene import load_prepared_scene
 from gpis_splatting.renderer import load_image
