@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+message: "If you use GPIS-Splatting, please cite it using the metadata below."
+title: "GPIS-Splatting: GPIS-aware uncertainty and initialization prototypes for 3D Gaussian splatting"
+type: software
+authors:
+  - family-names: "Pfaff"
+    given-names: "Florian"
+    affiliation: "Institute of Industrial Automation and Software Engineering (IAS), University of Stuttgart"
+    email: "pfaff@ias.uni-stuttgart.de"
+repository-code: "https://github.com/IPS-Stuttgart/GPIS-Splatting"
+url: "https://github.com/IPS-Stuttgart/GPIS-Splatting"
+version: "0.1.0"
+license: "MIT"
+abstract: >
+  GPIS-Splatting is a compact Python prototype for Gaussian-process implicit
+  surface priors and uncertainty-aware splat-rendering experiments. It focuses
+  on synthetic, CPU-friendly studies of GPIS initialization, calibrated
+  confidence, and render-consistency diagnostics for early 3D Gaussian
+  splatting workflows.
+keywords:
+  - Gaussian-process implicit surfaces
+  - 3D Gaussian splatting
+  - uncertainty
+  - rendering
+  - computer vision
+preferred-citation:
+  type: software
+  title: "GPIS-Splatting: GPIS-aware uncertainty and initialization prototypes for 3D Gaussian splatting"
+  authors:
+    - family-names: "Pfaff"
+      given-names: "Florian"
+  year: 2026
+  url: "https://github.com/IPS-Stuttgart/GPIS-Splatting"
+  license: "MIT"
