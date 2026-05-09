@@ -11,10 +11,12 @@ from gpis_splatting.gpis import fit_dense_gpis, predict_gpis, save_model, surfac
 from gpis_splatting.gpis_backends import (
     DenseExactGPISBackend,
     GPISBackendName,
+    InducingPointGPISBackend,
     LocalExactGPISBackend,
     fit_gpis_backend,
     load_gpis_backend,
     nearest_training_indices,
+    select_inducing_indices,
 )
 
 
@@ -82,14 +84,78 @@ def test_local_exact_backend_predicts_finite_quantities_and_saves(tmp_path: Path
     torch.testing.assert_close(loaded_prediction.gradient, prediction.gradient)
 
 
+def test_inducing_point_backend_predicts_finite_quantities_and_saves(tmp_path: Path) -> None:
+    x_train, y_train = make_training_data(80)
+    backend = InducingPointGPISBackend.fit(
+        x_train,
+        y_train,
+        lengthscale=0.5,
+        noise_std=0.05,
+        num_inducing=18,
+        inducing_selection="farthest",
+        fit_batch_size=23,
+    )
+    query = x_train[:9] * 0.95
+
+    prediction = backend.predict(query, batch_size=4)
+    gate = surface_band_probability(prediction, epsilon=0.08)
+
+    assert backend.num_inducing == 18
+    assert backend.training_count == 80
+    assert prediction.mean.shape == (9,)
+    assert prediction.variance.shape == (9,)
+    assert prediction.gradient.shape == (9, 3)
+    assert torch.all(torch.isfinite(prediction.mean))
+    assert torch.all(torch.isfinite(prediction.gradient))
+    assert torch.all(prediction.variance > 0.0)
+    assert torch.all((gate >= 0.0) & (gate <= 1.0))
+
+    path = tmp_path / "inducing_backend.npz"
+    backend.save(path, metadata={"scene": "unit"})
+    loaded, metadata = load_gpis_backend(path)
+    loaded_prediction = loaded.predict(query, batch_size=3)
+
+    assert isinstance(loaded, InducingPointGPISBackend)
+    assert metadata["scene"] == "unit"
+    assert metadata["backend"] == "inducing_points"
+    torch.testing.assert_close(loaded_prediction.mean, prediction.mean)
+    torch.testing.assert_close(loaded_prediction.variance, prediction.variance)
+    torch.testing.assert_close(loaded_prediction.gradient, prediction.gradient)
+
+
+def test_inducing_point_backend_matches_dense_when_all_points_are_inducing() -> None:
+    x_train, y_train = make_training_data(24)
+    query = x_train[:6] + 0.02
+    dense = DenseExactGPISBackend.fit(x_train, y_train, lengthscale=0.7, noise_std=0.08, jitter=1e-8)
+    inducing = InducingPointGPISBackend.fit(
+        x_train,
+        y_train,
+        lengthscale=0.7,
+        noise_std=0.08,
+        jitter=1e-8,
+        num_inducing=100,
+        inducing_selection="first",
+        fit_batch_size=7,
+    )
+
+    dense_prediction = dense.predict(query, batch_size=3)
+    inducing_prediction = inducing.predict(query, batch_size=3)
+
+    torch.testing.assert_close(inducing_prediction.mean, dense_prediction.mean, rtol=3e-4, atol=3e-4)
+    torch.testing.assert_close(inducing_prediction.variance, dense_prediction.variance, rtol=3e-4, atol=3e-4)
+    torch.testing.assert_close(inducing_prediction.gradient, dense_prediction.gradient, rtol=5e-4, atol=5e-4)
+
+
 def test_fit_gpis_backend_dispatches_and_validates_unknown_backend() -> None:
     x_train, y_train = make_training_data(16)
 
     dense = fit_gpis_backend("dense_exact", x_train, y_train)
     local = fit_gpis_backend("local_exact", x_train, y_train, num_neighbors=5)
+    inducing = fit_gpis_backend("inducing_points", x_train, y_train, num_inducing=6, fit_batch_size=5)
 
     assert isinstance(dense, DenseExactGPISBackend)
     assert isinstance(local, LocalExactGPISBackend)
+    assert isinstance(inducing, InducingPointGPISBackend)
     with pytest.raises(ValueError, match="Unknown GPIS backend"):
         fit_gpis_backend(cast(GPISBackendName, "not_a_backend"), x_train, y_train)
 
@@ -100,3 +166,18 @@ def test_nearest_training_indices_caps_requested_neighbor_count() -> None:
 
     assert indices.shape == (2, 4)
     assert np.all(np.isin(indices.numpy(), np.arange(4)))
+
+
+def test_select_inducing_indices_supports_deterministic_strategies() -> None:
+    x_train, _ = make_training_data(7)
+
+    first = select_inducing_indices(x_train, num_inducing=3, method="first")
+    uniform = select_inducing_indices(x_train, num_inducing=3, method="uniform")
+    farthest = select_inducing_indices(x_train, num_inducing=3, method="farthest")
+
+    torch.testing.assert_close(first, torch.tensor([0, 1, 2]))
+    assert uniform.shape == (3,)
+    assert farthest.shape == (3,)
+    assert len(set(farthest.tolist())) == 3
+    with pytest.raises(ValueError, match="inducing_selection"):
+        select_inducing_indices(x_train, num_inducing=3, method="bad")
