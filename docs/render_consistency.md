@@ -4,9 +4,11 @@
 
 It evaluates three failure modes that are easy to miss with per-frame image metrics:
 
-1. **Pose-aware adjacent-view consistency**: consecutive frames in a prepared-scene split are compared in prediction space and target space. The report highlights excess prediction deltas above the target-image delta, which is a simple proxy for popping, unstable depth ordering, and view-dependent splat artifacts. When camera poses are available, the rows also report camera-center translation, relative rotation, and view-motion-normalized instability. Optional view-motion filters let you restrict the report to small-baseline pairs.
+1. **Pose-aware adjacent-view consistency**: consecutive frames in a prepared-scene split are compared in prediction space and target space. The report highlights excess prediction deltas above the target-image delta, which is a simple proxy for popping, unstable depth ordering, and view-dependent splat artifacts.
+   When camera poses are available, the rows also report camera-center translation, relative rotation, and view-motion-normalized instability. Optional view-motion filters let you restrict the report to small-baseline pairs.
 2. **Scale / external anti-aliasing consistency**: optional render directories from different resolution or anti-aliasing settings are compared against a base render directory after resizing to a common resolution. This exposes renders that look good at one resolution but change materially when projected or filtered differently.
-3. **Built-in anti-aliasing round-trip consistency**: each base prediction is low-pass filtered by an anti-aliased downsample and then upsampled back to the original resolution. The residual against the original image estimates high-frequency/aliasing sensitivity even when no extra render directory exists. The same round trip is computed on target images, and excess prediction residuals are reported separately from natural target-image high frequencies.
+3. **Built-in anti-aliasing round-trip consistency**: each base prediction is low-pass filtered by an anti-aliased downsample and then upsampled back to the original resolution. The residual against the original image estimates high-frequency/aliasing sensitivity even when no extra render directory exists.
+   The same round trip is computed on target images, and excess prediction residuals are reported separately from natural target-image high frequencies.
 
 The command writes CSV, JSON, and Markdown outputs under `<scene-dir>/evaluations` by default.
 

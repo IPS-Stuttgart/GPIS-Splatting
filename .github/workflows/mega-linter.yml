@@ -18,9 +18,9 @@ on: # yamllint disable-line rule:truthy
   workflow_dispatch:
 
 env:
-  APPLY_FIXES: all
-  APPLY_FIXES_EVENT: push
-  APPLY_FIXES_MODE: pull_request
+  APPLY_FIXES: ${{ github.event_name == 'pull_request' && 'all' || 'none' }}
+  APPLY_FIXES_EVENT: pull_request
+  APPLY_FIXES_MODE: commit
 
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}

@@ -205,7 +205,6 @@ jobs:
             --output-model "${OUTPUT_PREFIX}_gpis_model.npz" \
             --max-train-points "${MAX_TRAIN_POINTS}"
       # jscpd:ignore-end
-
       - name: Evaluate GPIS gate geometry
         run: |
           read -r -a THRESHOLD_ARGS <<< "${THRESHOLDS}"

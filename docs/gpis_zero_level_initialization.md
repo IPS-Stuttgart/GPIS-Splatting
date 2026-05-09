@@ -26,4 +26,6 @@ The output `.npz` remains compatible with existing internal splat workflows. In 
 
 When `--output-ply` is passed, the command also writes a binary little-endian 3DGS-style PLY with `scale_0..2` and `rot_0..3` fields. Scales are stored in the logarithmic convention used by standard 3DGS point-cloud PLYs, and colors are written as SH DC coefficients.
 
-The initializer is intentionally conservative by default: most candidates are sampled near reference seed splats, then projected to the implicit surface. Increase `--surface-seed-fraction` for sparse reconstructions where COLMAP points are reliable, or decrease it to let the GPIS field hallucinate more zero-level coverage inside the inferred bounds. Use `--max-distance-std` to reject high-uncertainty zero-level candidates when the GPIS posterior is underconstrained.
+The initializer is intentionally conservative by default: most candidates are sampled near reference seed splats, then projected to the implicit surface. Increase `--surface-seed-fraction` for sparse reconstructions where COLMAP points are reliable, or decrease it to let the GPIS field hallucinate more zero-level coverage inside the inferred bounds.
+
+Use `--max-distance-std` to reject high-uncertainty zero-level candidates when the GPIS posterior is underconstrained.
