@@ -215,6 +215,7 @@ jobs:
           map_3dgs_renders_to_prepared_scene --help > /dev/null
           export_3dgs_gpis_variants --help > /dev/null
           evaluate_3dgs_variant_renders --help > /dev/null
+          render_3dgs_with_gsplat --help > /dev/null
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v7
