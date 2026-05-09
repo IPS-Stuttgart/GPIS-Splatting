@@ -63,6 +63,7 @@ map_3dgs_renders_to_prepared_scene = "gpis_splatting.cli.map_3dgs_renders_to_pre
 export_3dgs_gpis_variants = "gpis_splatting.cli.export_3dgs_gpis_variants:main"
 evaluate_3dgs_variant_renders = "gpis_splatting.cli.evaluate_3dgs_variant_renders:main"
 render_3dgs_with_gsplat = "gpis_splatting.cli.render_3dgs_with_gsplat:main"
+validate_3dgs_baseline_photometry = "gpis_splatting.cli.validate_3dgs_baseline_photometry:main"
 write_reproducibility_report = "gpis_splatting.cli.write_reproducibility_report:main"
 
 [tool.pytest.ini_options]
