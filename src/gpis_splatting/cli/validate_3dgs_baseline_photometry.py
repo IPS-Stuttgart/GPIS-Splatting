@@ -5,8 +5,11 @@ from pathlib import Path
 
 from gpis_splatting.baseline_photometry import validate_3dgs_baseline_photometry
 from gpis_splatting.cli.evaluate_real_renders import str_to_bool
-from gpis_splatting.gsplat_adapter import BACKGROUND_MODES, RASTERIZE_MODES, SH_COLOR_MODES
 from gpis_splatting.real_pipeline import parse_rgb_triplet
+
+SH_COLOR_MODES = ("auto", "sh", "rgb")
+BACKGROUND_MODES = ("auto", "black", "white", "rgb")
+RASTERIZE_MODES = ("classic", "antialiased")
 
 
 def parse_sh_degree(value: str) -> int | str:
