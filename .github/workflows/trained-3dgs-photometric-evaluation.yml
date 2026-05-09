@@ -2,7 +2,7 @@
 # yamllint disable rule:line-length
 name: Trained 3DGS Photometric Evaluation
 
-on:  # yamllint disable-line rule:truthy
+on: # yamllint disable-line rule:truthy
   workflow_dispatch:
     inputs:
       prepared_scene:
