@@ -151,7 +151,7 @@ jobs:
           import shutil
           from pathlib import Path
 
-          cache_base = Path(os.environ.get("RUNNER_TOOL_CACHE") or Path.home() / ".cache")
+          cache_base = Path.home() / ".cache" / "datasets"
           cache_dir = (
               cache_base
               / "gpis-splatting"
@@ -213,6 +213,7 @@ jobs:
           python - <<'PY'
           from __future__ import annotations
 
+          import hashlib
           import os
           import shutil
           import urllib.parse
@@ -223,6 +224,17 @@ jobs:
           scene_dir = Path(os.environ["DOWNLOAD_ROOT"]) / "tanks_temples" / os.environ["TNT_SCENE"]
           archive = scene_dir / "_external" / "barn_owncloud_payload.zip"
           data_url = os.environ["DATA_URL"]
+          url_fingerprint = hashlib.sha256(data_url.encode("utf-8")).hexdigest()[:16]
+          payload_cache_dir = (
+              Path.home()
+              / ".cache"
+              / "datasets"
+              / "gpis-splatting"
+              / "barn-auxiliary"
+              / os.environ["DATA_CACHE_VERSION"]
+              / url_fingerprint
+          )
+          payload_cache_archive = payload_cache_dir / "barn_owncloud_payload.zip"
 
           def data_url_candidates(url: str) -> list[str]:
               candidates: list[str] = []
@@ -266,7 +278,21 @@ jobs:
                           temporary.unlink()
               raise ValueError("DATA_URL did not resolve to a zip payload. " + " | ".join(errors))
 
-          download_zip_payload(data_url, archive)
+          archive.parent.mkdir(parents=True, exist_ok=True)
+          if payload_cache_archive.is_file() and zipfile.is_zipfile(payload_cache_archive):
+              shutil.copy2(payload_cache_archive, archive)
+              print(f"Restored Barn auxiliary DATA_URL payload from local runner cache: {payload_cache_archive}")
+          else:
+              payload_cache_dir.mkdir(parents=True, exist_ok=True)
+              temporary_cache_archive = payload_cache_archive.with_name(
+                  f"{payload_cache_archive.stem}.tmp-{os.environ['GITHUB_RUN_ID']}.zip"
+              )
+              if temporary_cache_archive.exists():
+                  temporary_cache_archive.unlink()
+              download_zip_payload(data_url, temporary_cache_archive)
+              temporary_cache_archive.replace(payload_cache_archive)
+              shutil.copy2(payload_cache_archive, archive)
+              print(f"Cached Barn auxiliary DATA_URL payload at: {payload_cache_archive}")
           extract_dir = scene_dir / "_external" / "barn_owncloud_payload"
           if extract_dir.exists():
               shutil.rmtree(extract_dir)
