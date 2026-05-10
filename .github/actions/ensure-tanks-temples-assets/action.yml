@@ -1,0 +1,172 @@
+name: Ensure Tanks and Temples assets
+description: Restore, download, validate, and cache Tanks and Temples scene assets.
+
+inputs:
+  scene:
+    description: Tanks and Temples scene name.
+    required: true
+  download-root:
+    description: Root directory used by download_tanks_temples_scene.
+    required: false
+    default: real_scenes/_downloads
+  max-images:
+    description: Maximum images to extract; 0 means all images.
+    required: true
+  cache-key:
+    description: GitHub Actions cache key for GitHub-hosted runners.
+    required: false
+    default: ""
+  cache-version:
+    description: Cache version suffix used in the default self-hosted local path.
+    required: false
+    default: v1
+  local-cache-root:
+    description: Optional self-hosted scene cache directory. Empty uses $HOME/github-runner/.cache/datasets/gpis-splatting/tanks-temples.
+    required: false
+    default: ""
+
+outputs:
+  scene-dir:
+    description: Workspace Tanks and Temples scene directory.
+    value: ${{ steps.paths.outputs.scene-dir }}
+  cache-hit:
+    description: true when a local or GitHub Actions cache was restored.
+    value: ${{ steps.finish.outputs.cache-hit }}
+  source:
+    description: local, github-cache, or download.
+    value: ${{ steps.finish.outputs.source }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve Tanks and Temples cache paths
+      id: paths
+      shell: bash
+      env:
+        INPUT_SCENE: ${{ inputs.scene }}
+        INPUT_DOWNLOAD_ROOT: ${{ inputs.download-root }}
+        INPUT_MAX_IMAGES: ${{ inputs.max-images }}
+        INPUT_CACHE_VERSION: ${{ inputs.cache-version }}
+        INPUT_LOCAL_CACHE_ROOT: ${{ inputs.local-cache-root }}
+      run: |
+        set -euo pipefail
+        workspace_download_root="${GITHUB_WORKSPACE}/${INPUT_DOWNLOAD_ROOT}"
+        scene_dir="${workspace_download_root}/tanks_temples/${INPUT_SCENE}"
+        local_root="${INPUT_LOCAL_CACHE_ROOT}"
+        if [ -z "${local_root}" ]; then
+          local_root="${HOME}/github-runner/.cache/datasets/gpis-splatting/tanks-temples/${INPUT_CACHE_VERSION}/images${INPUT_MAX_IMAGES}/tanks_temples/${INPUT_SCENE}"
+        fi
+        active_scene_dir="${scene_dir}"
+        active_download_root="${workspace_download_root}"
+        if [ "${{ runner.environment }}" = "self-hosted" ]; then
+          active_scene_dir="${local_root}"
+          active_download_root="$(dirname "$(dirname "${local_root}")")"
+        fi
+        mkdir -p "$(dirname "${scene_dir}")" "$(dirname "${local_root}")"
+        {
+          echo "scene-dir=${scene_dir}"
+          echo "local-root=${local_root}"
+          echo "active-scene-dir=${active_scene_dir}"
+          echo "active-download-root=${active_download_root}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Restore self-hosted local scene cache
+      id: local-cache
+      if: ${{ runner.environment == 'self-hosted' }}
+      shell: bash
+      env:
+        SCENE_DIR: ${{ steps.paths.outputs.scene-dir }}
+        LOCAL_ROOT: ${{ steps.paths.outputs.local-root }}
+      run: |
+        set -euo pipefail
+        if [ -d "${LOCAL_ROOT}" ] && [ -n "$(find "${LOCAL_ROOT}" -type f -print -quit 2>/dev/null)" ]; then
+          rm -rf "${SCENE_DIR}"
+          mkdir -p "${SCENE_DIR}"
+          cp -a "${LOCAL_ROOT}/." "${SCENE_DIR}/"
+          echo "hit=true" >> "$GITHUB_OUTPUT"
+          echo "Restored Tanks and Temples scene from self-hosted local cache: ${LOCAL_ROOT}"
+        else
+          echo "hit=false" >> "$GITHUB_OUTPUT"
+          echo "No self-hosted local Tanks and Temples cache at ${LOCAL_ROOT}"
+        fi
+
+    - name: Restore GitHub scene cache
+      id: github-cache
+      if: ${{ runner.environment != 'self-hosted' && steps.local-cache.outputs.hit != 'true' && inputs.cache-key != '' }}
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ steps.paths.outputs.scene-dir }}
+        key: ${{ inputs.cache-key }}
+
+    - name: Download Tanks and Temples scene
+      if: ${{ steps.local-cache.outputs.hit != 'true' && steps.github-cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        python -m gpis_splatting.cli.download_tanks_temples_scene \
+          --scene "${{ inputs.scene }}" \
+          --output-root "${{ steps.paths.outputs.active-download-root }}" \
+          --max-images "${{ inputs.max-images }}"
+
+    - name: Write Tanks and Temples cache manifest
+      shell: bash
+      env:
+        SCENE_DIR: ${{ steps.paths.outputs.active-scene-dir }}
+      run: |
+        set -euo pipefail
+        if [ ! -d "${SCENE_DIR}" ] || [ -z "$(find "${SCENE_DIR}" -type f -print -quit 2>/dev/null)" ]; then
+          echo "Tanks and Temples scene cache is empty: ${SCENE_DIR}" >&2
+          exit 1
+        fi
+        {
+          echo "scene=${{ inputs.scene }}"
+          echo "max_images=${{ inputs.max-images }}"
+          echo "cache_version=${{ inputs.cache-version }}"
+          echo "scene_dir=${SCENE_DIR}"
+          echo
+          find "${SCENE_DIR}" -type f -printf '%s %p\n' | sort
+        } > "${SCENE_DIR}/MANIFEST.txt"
+        du -sh "${SCENE_DIR}" || true
+
+    - name: Mirror self-hosted scene into workspace
+      if: ${{ runner.environment == 'self-hosted' }}
+      shell: bash
+      env:
+        SCENE_DIR: ${{ steps.paths.outputs.scene-dir }}
+        ACTIVE_SCENE_DIR: ${{ steps.paths.outputs.active-scene-dir }}
+      run: |
+        set -euo pipefail
+        if [ "$(realpath -m "${SCENE_DIR}")" = "$(realpath -m "${ACTIVE_SCENE_DIR}")" ]; then
+          exit 0
+        fi
+        rm -rf "${SCENE_DIR}"
+        mkdir -p "${SCENE_DIR}"
+        cp -a "${ACTIVE_SCENE_DIR}/." "${SCENE_DIR}/"
+        echo "Mirrored self-hosted Tanks and Temples cache into workspace: ${SCENE_DIR}"
+
+    - name: Save GitHub scene cache
+      if: ${{ runner.environment != 'self-hosted' && steps.local-cache.outputs.hit != 'true' && steps.github-cache.outputs.cache-hit != 'true' && inputs.cache-key != '' }}
+      uses: actions/cache/save@v5
+      continue-on-error: true
+      with:
+        path: ${{ steps.paths.outputs.scene-dir }}
+        key: ${{ inputs.cache-key }}
+
+    - name: Finalize Tanks and Temples cache
+      id: finish
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ '${{ steps.local-cache.outputs.hit }}' = 'true' ]; then
+          source=local
+          hit=true
+        elif [ '${{ steps.github-cache.outputs.cache-hit }}' = 'true' ]; then
+          source=github-cache
+          hit=true
+        else
+          source=download
+          hit=false
+        fi
+        echo "source=${source}" >> "$GITHUB_OUTPUT"
+        echo "cache-hit=${hit}" >> "$GITHUB_OUTPUT"
+        echo "Tanks and Temples cache source: ${source}"
