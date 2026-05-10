@@ -4,10 +4,11 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 import torch
 
 from gpis_splatting.external_3dgs import load_3dgs_ply, opacity_to_alpha, vertex_colors
-from gpis_splatting.gsplat_adapter import GsplatGaussianTensors, frame_to_gsplat_camera, resolve_device, resolve_gsplat_rasterization, resolve_torch_dtype
+from gpis_splatting.gsplat_adapter import GsplatGaussianTensors, frame_to_gsplat_camera, infer_iteration_from_point_cloud_path, resolve_device, resolve_gsplat_rasterization, resolve_torch_dtype, validate_gsplat_manifest
 from gpis_splatting.real_pipeline import resolve_frame_indices, resolve_projection_convention
 from gpis_splatting.real_scene import load_prepared_scene
 from gpis_splatting.renderer import save_image
@@ -57,6 +58,83 @@ def render_3dgs_ply_with_gsplat(*, input_ply_path: str | Path, scene_dir: str | 
     report = {"schema_version": 2, "backend": "gsplat", "input_ply_path": str(Path(input_ply_path)), "scene_dir": str(scene_root), "output_dir": str(out_dir), "split": split, "projection_convention": convention, "source_gaussian_count": gaussians.source_gaussian_count, "rendered_gaussian_count": gaussians.gaussian_count, "background_color": bg, "color": color_info, "image_count": len(outputs), "outputs": outputs}
     write_json(report_path, report)
     return {"output_dir": out_dir, "report_path": report_path, "report": report}
+
+
+def render_3dgs_manifest_with_gsplat(*, manifest_path: str | Path, scene_dir: str | Path, output_root: str | Path, method_name: str = "trained_3dgs_gsplat", split: str = "test", projection_convention: str = "auto", device: str = "auto", dtype: str | torch.dtype = "float32", opacity_mode: str = "logit", color_mode: str = "auto", sh_degree: int | str | None = "auto", strict_3dgs_fidelity: bool = True, background_mode: str = "auto", background_color: tuple[float, float, float] = (0.0, 0.0, 0.0), near_plane: float = 1e-2, far_plane: float = 1.0e10, radius_clip: float = 0.0, eps2d: float = 0.3, tile_size: int = 16, packed: bool = True, render_mode: str = "RGB", rasterize_mode: str = "classic", channel_chunk: int = 32, max_frames: int | None = None, max_gaussians: int | None = None, rasterization_fn: Any | None = None) -> dict[str, Any]:
+    manifest = pd.read_csv(manifest_path)
+    validate_gsplat_manifest(manifest)
+    out_root = Path(output_root)
+    out_root.mkdir(parents=True, exist_ok=True)
+    rasterizer = rasterization_fn or resolve_gsplat_rasterization()
+    rows = []
+    for row in manifest.itertuples(index=False):
+        variant = str(row.variant)
+        point_cloud_path = Path(str(row.point_cloud_path))
+        iteration = infer_iteration_from_point_cloud_path(point_cloud_path)
+        prediction_subdir = Path(split) / f"ours_{iteration}" / "renders"
+        result = render_3dgs_ply_with_gsplat(
+            input_ply_path=point_cloud_path,
+            scene_dir=scene_dir,
+            output_dir=out_root / variant / prediction_subdir,
+            split=split,
+            projection_convention=projection_convention,
+            device=device,
+            dtype=dtype,
+            opacity_mode=opacity_mode,
+            color_mode=color_mode,
+            sh_degree=sh_degree,
+            strict_3dgs_fidelity=strict_3dgs_fidelity,
+            background_mode=background_mode,
+            background_color=background_color,
+            near_plane=near_plane,
+            far_plane=far_plane,
+            radius_clip=radius_clip,
+            eps2d=eps2d,
+            tile_size=tile_size,
+            packed=packed,
+            render_mode=render_mode,
+            rasterize_mode=rasterize_mode,
+            channel_chunk=channel_chunk,
+            max_frames=max_frames,
+            max_gaussians=max_gaussians,
+            rasterization_fn=rasterizer,
+        )
+        rows.append(
+            {
+                "method": method_name,
+                "variant": variant,
+                "variant_kind": getattr(row, "variant_kind", None),
+                "point_cloud_path": str(point_cloud_path),
+                "predictions_dir": str(result["output_dir"]),
+                "prediction_subdir": str(prediction_subdir),
+                "iteration": iteration,
+                "image_count": int(result["report"]["image_count"]),
+                "rendered_gaussian_count": int(result["report"]["rendered_gaussian_count"]),
+                "report_path": str(result["report_path"]),
+            }
+        )
+
+    render_manifest = pd.DataFrame(rows)
+    render_manifest_path = out_root / f"{method_name}_gsplat_render_manifest.csv"
+    status_path = out_root / f"{method_name}_gsplat_render_status.json"
+    report_path = out_root / f"{method_name}_gsplat_render_report.md"
+    render_manifest.to_csv(render_manifest_path, index=False)
+    status = {
+        "schema_version": 2,
+        "backend": "gsplat",
+        "adapter": "fidelity",
+        "method": method_name,
+        "manifest_path": str(Path(manifest_path)),
+        "scene_dir": str(Path(scene_dir)),
+        "output_root": str(out_root),
+        "split": split,
+        "variant_count": int(len(render_manifest)),
+        "render_manifest_path": str(render_manifest_path),
+        "report_path": str(report_path),
+    }
+    write_json(status_path, status)
+    report_path.write_text(format_gsplat_manifest_report(status, render_manifest), encoding="utf-8")
+    return {"render_manifest_path": render_manifest_path, "status_path": status_path, "report_path": report_path, "manifest": render_manifest, "status": status}
 
 
 def gaussian_ply_to_gsplat_tensors(ply: Any, *, device: str | torch.device, dtype: str | torch.dtype, opacity_mode: str, color_mode: str = "auto", sh_degree: int | str | None = "auto", strict_3dgs_fidelity: bool = True, max_gaussians: int | None = None) -> tuple[GsplatGaussianTensors, dict[str, Any]]:
@@ -120,3 +198,27 @@ def extract_rgb_image(output: Any) -> torch.Tensor:
     image = rendered if isinstance(rendered, torch.Tensor) else torch.as_tensor(rendered)
     image = image[0] if image.ndim == 4 else image
     return image[..., :3].clamp(0.0, 1.0).detach().cpu()
+
+
+def format_gsplat_manifest_report(status: dict[str, Any], manifest: pd.DataFrame) -> str:
+    lines = [
+        "# gsplat 3DGS Fidelity Render Report",
+        "",
+        f"- Backend: `{status['backend']}`",
+        f"- Adapter: `{status['adapter']}`",
+        f"- Method: `{status['method']}`",
+        f"- Source manifest: `{status['manifest_path']}`",
+        f"- Scene: `{status['scene_dir']}`",
+        f"- Output root: `{status['output_root']}`",
+        f"- Split: `{status['split']}`",
+        f"- Variants rendered: `{status['variant_count']}`",
+        f"- Render manifest: `{status['render_manifest_path']}`",
+        "",
+        "## Variants",
+        "",
+        "| variant | kind | iteration | images | gaussians | predictions_dir |",
+        "| --- | --- | ---: | ---: | ---: | --- |",
+    ]
+    for row in manifest.itertuples(index=False):
+        lines.append(f"| `{row.variant}` | `{row.variant_kind}` | {row.iteration} | {row.image_count} | {row.rendered_gaussian_count} | `{row.predictions_dir}` |")
+    return "\n".join(lines) + "\n"
