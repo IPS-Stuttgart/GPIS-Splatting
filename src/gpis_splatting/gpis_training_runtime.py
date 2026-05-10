@@ -71,9 +71,17 @@ def initialization_metadata_from_prior(prior: dict[str, np.ndarray], *, max_coun
         "confidence": confidence[ranked],
         "weight": weight[ranked],
     }
-    for key in ("initialization_source_splat_index", "initialization_candidate_index"):
-        if key in prior:
-            result[key] = np.asarray(prior[key])[ranked]
+    metadata_keys = {
+        "initialization_source_splat_index": "source_splat_index",
+        "initialization_candidate_index": "candidate_index",
+    }
+    for prior_key, result_key in metadata_keys.items():
+        if prior_key not in prior:
+            continue
+        values = np.asarray(prior[prior_key])
+        if values.shape[0] != points.shape[0]:
+            raise ValueError(f"{prior_key} must match initialization_points.")
+        result[result_key] = values[ranked]
     return result
 
 
@@ -148,12 +156,13 @@ def training_policy_summary(prior: dict[str, np.ndarray]) -> dict[str, Any]:
     prune = pruning_mask_from_prior(prior)
     init_points = np.asarray(prior["initialization_points"])
     gate = np.asarray(prior.get("gate", prior.get("per_gaussian_gate", np.empty((0,)))), dtype=np.float64)
+    gate_mean = None if gate.size == 0 else float(np.round(gate.mean(), 7))
     return {
         "gaussian_count": int(np.asarray(prior["densify_weight"]).shape[0]),
         "initialization_candidate_count": int(init_points.shape[0]),
         "densify_candidate_count": int(densify.shape[0]),
         "prune_candidate_count": int(prune.sum()),
         "gate_min": None if gate.size == 0 else float(gate.min()),
-        "gate_mean": None if gate.size == 0 else float(gate.mean()),
+        "gate_mean": gate_mean,
         "gate_max": None if gate.size == 0 else float(gate.max()),
     }

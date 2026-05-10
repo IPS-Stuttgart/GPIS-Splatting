@@ -132,7 +132,8 @@ def point_cols(table: pd.DataFrame) -> tuple[str, str, str]:
 
 
 def alpha_values(vertices: np.ndarray, mode: str) -> np.ndarray:
-    if "opacity" not in (vertices.dtype.names or ()): return np.ones(vertices.shape[0], dtype=np.float64)
+    if "opacity" not in (vertices.dtype.names or ()):
+        return np.ones(vertices.shape[0], dtype=np.float64)
     return opacity_to_alpha(vertices["opacity"].astype(np.float64), opacity_mode=mode)
 
 
