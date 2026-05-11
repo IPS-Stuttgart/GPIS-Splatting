@@ -53,6 +53,13 @@ def export_gpis_training_prior(
     opacity_target_alpha = np.clip(current_alpha * opacity_confidence_scale, 1e-6, 1.0 - 1e-6)
     opacity_regularization_weight = np.clip(cfg.opacity_regularization_strength * (1.0 - plausibility), 0.0, None)
     init_mask = gate >= cfg.initialization_confidence_threshold
+    initialization_payload = build_initialization_payload(
+        ply.vertices,
+        gate=gate,
+        densify_weight=densify_weight,
+        init_mask=init_mask,
+        clone_top_count=cfg.clone_top_count,
+    )
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -72,6 +79,11 @@ def export_gpis_training_prior(
         opacity_current_alpha=current_alpha.astype(np.float32),
         opacity_confidence_scale=opacity_confidence_scale.astype(np.float32),
         initialization_candidate_mask=init_mask.astype(bool),
+        initialization_points=initialization_payload["points"].astype(np.float32),
+        initialization_confidence=initialization_payload["confidence"].astype(np.float32),
+        initialization_weight=initialization_payload["weight"].astype(np.float32),
+        initialization_source_splat_index=initialization_payload["source_splat_index"].astype(np.int64),
+        initialization_candidate_index=initialization_payload["candidate_index"].astype(np.int64),
     )
 
     seed_ply_path = out_dir / f"{method_name}_initialization_seed.ply"
@@ -90,6 +102,7 @@ def export_gpis_training_prior(
         "training_prior_path": str(prior_path),
         "initialization_seed_ply_path": str(seed_ply_path),
         "trainer_hooks_path": str(hooks_path),
+        "initialization_point_count": int(initialization_payload["points"].shape[0]),
         "gaussian_count": int(ply.vertex_count),
         "seed_count": int(seed_vertices.shape[0]),
         "initialization_candidate_count": int(init_mask.sum()),
@@ -156,18 +169,52 @@ def vertex_alpha(vertices: np.ndarray, *, opacity_mode: str) -> np.ndarray:
     return opacity_to_alpha(vertices["opacity"].astype(np.float64), opacity_mode=opacity_mode)
 
 
-def build_initialization_vertices(vertices: np.ndarray, *, gate: np.ndarray, densify_weight: np.ndarray, init_mask: np.ndarray, clone_top_count: int | None) -> np.ndarray:
-    selected = vertices[init_mask].copy()
+def vertex_positions(vertices: np.ndarray) -> np.ndarray:
+    names = vertices.dtype.names or ()
+    missing = [axis for axis in ("x", "y", "z") if axis not in names]
+    if missing:
+        raise ValueError(f"3DGS vertices are missing coordinate fields: {', '.join(missing)}.")
+    return np.stack([vertices["x"], vertices["y"], vertices["z"]], axis=1).astype(np.float64)
+
+
+def build_initialization_payload(
+    vertices: np.ndarray,
+    *,
+    gate: np.ndarray,
+    densify_weight: np.ndarray,
+    init_mask: np.ndarray,
+    clone_top_count: int | None,
+) -> dict[str, np.ndarray]:
+    source_indices = build_initialization_source_indices(vertices, gate=gate, densify_weight=densify_weight, init_mask=init_mask, clone_top_count=clone_top_count)
+    positions = vertex_positions(vertices)
+    return {
+        "points": positions[source_indices].copy(),
+        "confidence": gate[source_indices].astype(np.float64, copy=True),
+        "weight": densify_weight[source_indices].astype(np.float64, copy=True),
+        "source_splat_index": source_indices.astype(np.int64, copy=True),
+        "candidate_index": source_indices.astype(np.int64, copy=True),
+    }
+
+
+def build_initialization_source_indices(
+    vertices: np.ndarray,
+    *,
+    gate: np.ndarray,
+    densify_weight: np.ndarray,
+    init_mask: np.ndarray,
+    clone_top_count: int | None,
+) -> np.ndarray:
+    selected = np.flatnonzero(init_mask).astype(np.int64)
     if clone_top_count is None or clone_top_count <= 0:
         return selected
     count = min(int(clone_top_count), int(vertices.shape[0]))
-    order = np.argsort(-(gate * densify_weight))[:count]
-    clones = vertices[order].copy()
-    if clones.size and "opacity" in (clones.dtype.names or ()):
-        clones["opacity"] = np.asarray(clones["opacity"], dtype=clones["opacity"].dtype)
-    if selected.size == 0:
-        return clones
-    return np.concatenate([selected, clones], axis=0)
+    clones = np.argsort(-(gate * densify_weight))[:count].astype(np.int64)
+    return clones if selected.size == 0 else np.concatenate([selected, clones], axis=0)
+
+
+def build_initialization_vertices(vertices: np.ndarray, *, gate: np.ndarray, densify_weight: np.ndarray, init_mask: np.ndarray, clone_top_count: int | None) -> np.ndarray:
+    source_indices = build_initialization_source_indices(vertices, gate=gate, densify_weight=densify_weight, init_mask=init_mask, clone_top_count=clone_top_count)
+    return vertices[source_indices].copy()
 
 
 def format_trainer_hooks(method_name: str, prior_path: Path, seed_ply_path: Path, cfg: GpisTrainingPriorConfig) -> str:
@@ -179,6 +226,7 @@ def format_trainer_hooks(method_name: str, prior_path: Path, seed_ply_path: Path
             "",
             "## Initialization",
             f"- Seed or warm-start from `{seed_ply_path}`.",
+            f"- Or load `{prior_path}` and consume `initialization_points`, `initialization_confidence`, `initialization_weight`, and source/candidate metadata directly.",
             f"- Initialization threshold: `{cfg.initialization_confidence_threshold}`.",
             "",
             "## Densification / pruning",
