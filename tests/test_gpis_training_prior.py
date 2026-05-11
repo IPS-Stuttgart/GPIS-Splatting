@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from gpis_splatting.gpis_training_prior import GpisTrainingPriorConfig, export_gpis_training_prior
+from gpis_splatting.gpis_training_runtime import load_training_prior, training_policy_summary
 
 
 def test_export_gpis_training_prior_writes_soft_training_artifacts(tmp_path: Path) -> None:
@@ -33,8 +34,17 @@ def test_export_gpis_training_prior_writes_soft_training_artifacts(tmp_path: Pat
         assert data["prune_candidate_mask"].tolist() == [False, True, False]
         assert "opacity_regularization_weight" in data.files
         assert "opacity_target_alpha" in data.files
+        assert data["initialization_points"].shape == (3, 3)
+        assert data["initialization_confidence"].shape == (3,)
+        assert data["initialization_weight"].shape == (3,)
+        assert data["initialization_source_splat_index"].tolist() == [0, 2, 2]
+        assert data["initialization_candidate_index"].tolist() == [0, 2, 2]
+    prior = load_training_prior(result["prior_path"])
+    assert prior["initialization_points"].shape == (3, 3)
+    assert training_policy_summary(prior)["initialization_candidate_count"] == 3
     assert result["status"]["initialization_candidate_count"] == 2
     assert result["status"]["seed_count"] == 3
+    assert result["status"]["initialization_point_count"] == 3
     assert "lambda_gpis_opacity" in result["trainer_hooks_path"].read_text(encoding="utf-8")
 
 
