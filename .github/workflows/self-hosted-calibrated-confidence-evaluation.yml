@@ -507,10 +507,19 @@ jobs:
         with:
           name: self-hosted-calibrated-${{ matrix.scene }}-m${{ env.MAX_POINTS }}-t${{ env.MAX_TRAIN_POINTS }}-s${{ env.TRAIN_VIEW_COUNT }}
           path: |
+            real_scenes/_downloads/tanks_temples/${{ matrix.scene }}/alignment/**
+            real_scenes/_downloads/tanks_temples/${{ matrix.scene }}/camera_poses/**
+            real_scenes/_downloads/tanks_temples/${{ matrix.scene }}/crop/**
+            real_scenes/_downloads/tanks_temples/${{ matrix.scene }}/ground_truth/**
+            real_scenes/_downloads/tanks_temples/${{ matrix.scene }}/reconstruction/**
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/*_bootstrap_report.json
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/*_fit_report.json
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/*_gpis_model.npz
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/*_samples.npz
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/*_splats.npz
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/real_scene.json
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/cameras.json
+            real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/images/**
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/splits.json
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/validation.json
             real_scenes/*_selfhosted_m${{ env.MAX_POINTS }}_t${{ env.MAX_TRAIN_POINTS }}_s${{ env.TRAIN_VIEW_COUNT }}/evaluations/**/*.csv
