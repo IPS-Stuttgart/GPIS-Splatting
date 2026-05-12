@@ -180,6 +180,17 @@ jobs:
         with:
           clean: false
 
+      - name: Set up Python
+        # setup-python@v6 intermittently hangs after installing Python on the
+        # temporary self-hosted runners used for these heavy evaluations.
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            pyproject.toml
+
       - name: Validate prepared-scene artifact inputs
         if: ${{ inputs.prepared_scene_artifact_run_id != '' || inputs.prepared_scene_artifact_name != '' }}
         shell: bash
@@ -335,17 +346,6 @@ jobs:
 
           print(f"Restored prepared scene from artifact: {scene_source} -> {destination}")
           PY
-
-      - name: Set up Python
-        # setup-python@v6 intermittently hangs after installing Python on the
-        # temporary self-hosted runners used for these heavy evaluations.
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: |
-            requirements-dev.txt
-            pyproject.toml
 
       - name: Install package and dependencies
         run: |
