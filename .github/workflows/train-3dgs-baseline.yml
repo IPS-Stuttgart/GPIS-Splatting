@@ -330,6 +330,7 @@ jobs:
             --max-points "${MAX_POINTS}"
 
       - name: Detect CUDA toolchain
+        if: ${{ inputs.dry_run == false }}
         shell: bash
         run: |
           set -euo pipefail
