@@ -377,6 +377,12 @@ Tanks and Temples reconstruction, COLMAP `points3D.txt`, or an explicit `.ply`/i
 Train the standard 3DGS implementation on that exported directory. Then convert the trained 3DGS Gaussian PLY into the internal splat
 format, score/calibrate its centers with the existing GPIS tools, and export renderable 3DGS PLY variants:
 
+For a self-hosted training run, use the **Train Standard 3DGS Baseline** workflow. It exports the prepared scene to the COLMAP/3DGS
+layout, runs either the reference Graphdeco trainer or a supplied command template, validates the resulting
+`point_cloud/iteration_<n>/point_cloud.ply`, and uploads the trained model artifact. The downstream
+**Trained 3DGS Photometric Evaluation** workflow can restore that artifact through `trained_model_artifact` using
+`run_id|artifact_name|repository|relative_ply_path`, or it can continue to consume an explicit runner-local `trained_ply_path`.
+
 ```powershell
 convert_3dgs_ply_to_splats `
   --input-ply C:\runs\3dgs\barn\point_cloud\iteration_30000\point_cloud.ply `
