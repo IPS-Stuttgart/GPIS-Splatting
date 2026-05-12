@@ -200,13 +200,47 @@ jobs:
             exit 2
           fi
 
+      - name: Select prepared-scene source
+        shell: bash
+        run: |
+          python - <<'PY' | tee -a "${GITHUB_ENV}" > _prepared_scene_source.env
+          from __future__ import annotations
+
+          import os
+          from pathlib import Path
+
+          scene_dir = Path("real_scenes") / os.environ["PREPARED_SCENE"]
+          has_local_scene = all(
+              (scene_dir / name).is_file()
+              for name in ("real_scene.json", "cameras.json", "splits.json")
+          )
+          has_artifact_inputs = bool(os.environ["PREPARED_SCENE_ARTIFACT_RUN_ID"]) and bool(
+              os.environ["PREPARED_SCENE_ARTIFACT_NAME"]
+          )
+          use_artifact = has_artifact_inputs and not has_local_scene
+          print(f"USE_PREPARED_SCENE_ARTIFACT={str(use_artifact).lower()}")
+          print(f"PREPARED_SCENE_LOCAL_HIT={str(has_local_scene).lower()}")
+          PY
+          . _prepared_scene_source.env
+
+          if [ "${PREPARED_SCENE_LOCAL_HIT}" = "true" ]; then
+            echo "Using existing prepared scene at real_scenes/${PREPARED_SCENE}."
+          elif [ "${USE_PREPARED_SCENE_ARTIFACT}" = "true" ]; then
+            echo "Prepared scene not present locally; downloading ${PREPARED_SCENE_ARTIFACT_NAME}."
+          else
+            echo "Prepared scene not present locally and no artifact inputs were supplied."
+          fi
+
       - name: Download prepared-scene artifact
-        if: ${{ inputs.prepared_scene_artifact_run_id != '' && inputs.prepared_scene_artifact_name != '' }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if [ "${USE_PREPARED_SCENE_ARTIFACT:-false}" != "true" ]; then
+            echo "Skipping prepared-scene artifact download."
+            exit 0
+          fi
 
           rm -rf _prepared_scene_artifact _prepared_scene_artifact.zip
           mkdir -p _prepared_scene_artifact
@@ -265,7 +299,7 @@ jobs:
 
           artifact_url="$(cat _prepared_scene_artifact_url.txt)"
           curl --fail --location --show-error --retry 5 --retry-delay 10 \
-            --connect-timeout 30 --max-time 2400 \
+            --connect-timeout 30 --max-time 2400 --speed-limit 1024 --speed-time 120 \
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer ${GH_TOKEN}" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
@@ -284,9 +318,12 @@ jobs:
           PY
 
       - name: Restore prepared scene from artifact
-        if: ${{ inputs.prepared_scene_artifact_run_id != '' && inputs.prepared_scene_artifact_name != '' }}
         shell: bash
         run: |
+          if [ "${USE_PREPARED_SCENE_ARTIFACT:-false}" != "true" ]; then
+            echo "Skipping prepared-scene artifact restore."
+            exit 0
+          fi
           python - <<'PY'
           from __future__ import annotations
 
