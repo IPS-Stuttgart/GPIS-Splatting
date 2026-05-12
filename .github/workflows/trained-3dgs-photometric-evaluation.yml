@@ -191,13 +191,86 @@ jobs:
 
       - name: Download prepared-scene artifact
         if: ${{ inputs.prepared_scene_artifact_run_id != '' && inputs.prepared_scene_artifact_name != '' }}
-        uses: actions/download-artifact@v7
-        with:
-          name: ${{ inputs.prepared_scene_artifact_name }}
-          path: _prepared_scene_artifact
-          github-token: ${{ github.token }}
-          repository: ${{ inputs.prepared_scene_artifact_repository }}
-          run-id: ${{ inputs.prepared_scene_artifact_run_id }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          rm -rf _prepared_scene_artifact _prepared_scene_artifact.zip
+          mkdir -p _prepared_scene_artifact
+
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          import urllib.request
+
+          repository = os.environ["PREPARED_SCENE_ARTIFACT_REPOSITORY"]
+          run_id = os.environ["PREPARED_SCENE_ARTIFACT_RUN_ID"]
+          artifact_name = os.environ["PREPARED_SCENE_ARTIFACT_NAME"]
+          token = os.environ["GH_TOKEN"]
+          artifacts_url = (
+              f"https://api.github.com/repos/{repository}/actions/runs/"
+              f"{run_id}/artifacts?per_page=100"
+          )
+          request = urllib.request.Request(
+              artifacts_url,
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {token}",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=60) as response:
+              payload = json.load(response)
+
+          matches = [
+              artifact
+              for artifact in payload.get("artifacts", [])
+              if artifact.get("name") == artifact_name
+          ]
+          if not matches:
+              available = ", ".join(
+                  sorted(artifact.get("name", "<unnamed>") for artifact in payload.get("artifacts", []))
+              )
+              raise SystemExit(
+                  f"Could not find prepared-scene artifact {artifact_name!r} "
+                  f"in {repository} run {run_id}. Available artifacts: {available}"
+              )
+
+          artifact = matches[0]
+          if artifact.get("expired"):
+              raise SystemExit(f"Prepared-scene artifact {artifact_name!r} is expired.")
+
+          with open("_prepared_scene_artifact_url.txt", "w", encoding="utf-8") as handle:
+              handle.write(str(artifact["archive_download_url"]))
+          print(
+              "Resolved prepared-scene artifact "
+              f"{artifact_name!r}: id={artifact.get('id')} size={artifact.get('size_in_bytes')} bytes"
+          )
+          PY
+
+          artifact_url="$(cat _prepared_scene_artifact_url.txt)"
+          curl --fail --location --show-error --retry 5 --retry-delay 10 \
+            --connect-timeout 30 --max-time 2400 \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output _prepared_scene_artifact.zip \
+            "${artifact_url}"
+          unzip -q _prepared_scene_artifact.zip -d _prepared_scene_artifact
+          python - <<'PY'
+          from __future__ import annotations
+
+          from pathlib import Path
+
+          root = Path("_prepared_scene_artifact")
+          files = [path for path in root.rglob("*") if path.is_file()]
+          total_size = sum(path.stat().st_size for path in files)
+          print(f"Downloaded prepared-scene artifact files={len(files)} size={total_size} bytes")
+          PY
 
       - name: Restore prepared scene from artifact
         if: ${{ inputs.prepared_scene_artifact_run_id != '' && inputs.prepared_scene_artifact_name != '' }}
