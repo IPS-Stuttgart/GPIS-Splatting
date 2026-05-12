@@ -1,0 +1,480 @@
+---
+# yamllint disable rule:line-length
+name: Train Standard 3DGS Baseline
+
+on: # yamllint disable-line rule:truthy
+  workflow_dispatch:
+    inputs:
+      prepared_scene:
+        description: Prepared scene directory under real_scenes/.
+        required: true
+        type: string
+        default: barn_selfhosted_m25000_t2500_s12
+      prepared_scene_artifact_run_id:
+        description: Optional workflow run ID containing a prepared-scene artifact to restore before training.
+        required: false
+        type: string
+        default: ""
+      prepared_scene_artifact_name:
+        description: Optional artifact name from prepared_scene_artifact_run_id.
+        required: false
+        type: string
+        default: ""
+      prepared_scene_artifact_repository:
+        description: Repository containing the prepared-scene artifact.
+        required: false
+        type: string
+        default: IPS-Stuttgart/GPIS-Splatting
+      export_split:
+        description: Prepared-scene split to export for 3DGS training.
+        required: true
+        type: choice
+        options:
+          - train
+          - all
+        default: train
+      max_points:
+        description: Maximum sparse points to export to COLMAP points3D.txt. Use 0 for all available points.
+        required: true
+        type: number
+        default: 100000
+      iterations:
+        description: 3DGS training iterations.
+        required: true
+        type: number
+        default: 30000
+      dry_run:
+        description: Export the COLMAP scene and validate commands without launching training.
+        required: true
+        type: boolean
+        default: true
+      install_reference_trainer:
+        description: Install the reference Graphdeco trainer dependencies before running the default command.
+        required: true
+        type: boolean
+        default: true
+      trainer_repository:
+        description: Reference 3DGS trainer repository to clone when train_command_template is empty.
+        required: true
+        type: string
+        default: https://github.com/graphdeco-inria/gaussian-splatting.git
+      trainer_ref:
+        description: Git ref to checkout in the reference trainer.
+        required: true
+        type: string
+        default: main
+      pytorch_index_url:
+        description: PyTorch wheel index URL for CUDA-enabled training.
+        required: true
+        type: string
+        default: https://download.pytorch.org/whl/cu124
+      train_command_template:
+        description: Optional shell command template. Placeholders are {colmap_scene_dir}, {model_dir}, {iterations}, {trainer_dir}, and {prepared_scene}.
+        required: false
+        type: string
+        default: ""
+      output_root:
+        description: Output directory under the workflow workspace.
+        required: true
+        type: string
+        default: _trained_3dgs_baseline
+      artifact_name:
+        description: Uploaded artifact name.
+        required: true
+        type: string
+        default: trained-3dgs-baseline
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  train:
+    name: ${{ inputs.prepared_scene }} standard 3DGS baseline
+    runs-on:
+      - self-hosted
+      - Linux
+    timeout-minutes: 1440
+
+    env:
+      PREPARED_SCENE: ${{ inputs.prepared_scene }}
+      PREPARED_SCENE_ARTIFACT_RUN_ID: ${{ inputs.prepared_scene_artifact_run_id }}
+      PREPARED_SCENE_ARTIFACT_NAME: ${{ inputs.prepared_scene_artifact_name }}
+      PREPARED_SCENE_ARTIFACT_REPOSITORY: ${{ inputs.prepared_scene_artifact_repository }}
+      EXPORT_SPLIT: ${{ inputs.export_split }}
+      MAX_POINTS: ${{ inputs.max_points }}
+      ITERATIONS: ${{ inputs.iterations }}
+      DRY_RUN: ${{ inputs.dry_run }}
+      INSTALL_REFERENCE_TRAINER: ${{ inputs.install_reference_trainer }}
+      TRAINER_REPOSITORY: ${{ inputs.trainer_repository }}
+      TRAINER_REF: ${{ inputs.trainer_ref }}
+      PYTORCH_INDEX_URL: ${{ inputs.pytorch_index_url }}
+      TRAIN_COMMAND_TEMPLATE: ${{ inputs.train_command_template }}
+      OUTPUT_ROOT: ${{ inputs.output_root }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          clean: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            pyproject.toml
+
+      - name: Validate prepared-scene artifact inputs
+        if: ${{ inputs.prepared_scene_artifact_run_id != '' || inputs.prepared_scene_artifact_name != '' }}
+        shell: bash
+        run: |
+          if [ -z "${PREPARED_SCENE_ARTIFACT_RUN_ID}" ] || [ -z "${PREPARED_SCENE_ARTIFACT_NAME}" ]; then
+            echo "prepared_scene_artifact_run_id and prepared_scene_artifact_name must be set together." >&2
+            exit 2
+          fi
+
+      - name: Select prepared-scene source
+        shell: bash
+        run: |
+          python - <<'PY' | tee -a "${GITHUB_ENV}" > _prepared_scene_source.env
+          from __future__ import annotations
+
+          import os
+          from pathlib import Path
+
+          scene_dir = Path("real_scenes") / os.environ["PREPARED_SCENE"]
+          has_local_scene = all(
+              (scene_dir / name).is_file()
+              for name in ("real_scene.json", "cameras.json", "splits.json")
+          )
+          has_artifact_inputs = bool(os.environ["PREPARED_SCENE_ARTIFACT_RUN_ID"]) and bool(
+              os.environ["PREPARED_SCENE_ARTIFACT_NAME"]
+          )
+          use_artifact = has_artifact_inputs and not has_local_scene
+          print(f"USE_PREPARED_SCENE_ARTIFACT={str(use_artifact).lower()}")
+          print(f"PREPARED_SCENE_LOCAL_HIT={str(has_local_scene).lower()}")
+          PY
+          . _prepared_scene_source.env
+
+          if [ "${PREPARED_SCENE_LOCAL_HIT}" = "true" ]; then
+            echo "Using existing prepared scene at real_scenes/${PREPARED_SCENE}."
+          elif [ "${USE_PREPARED_SCENE_ARTIFACT}" = "true" ]; then
+            echo "Prepared scene not present locally; downloading ${PREPARED_SCENE_ARTIFACT_NAME}."
+          else
+            echo "Prepared scene not present locally and no artifact inputs were supplied."
+          fi
+
+      - name: Download prepared-scene artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${USE_PREPARED_SCENE_ARTIFACT:-false}" != "true" ]; then
+            echo "Skipping prepared-scene artifact download."
+            exit 0
+          fi
+
+          rm -rf _prepared_scene_artifact _prepared_scene_artifact.zip
+          mkdir -p _prepared_scene_artifact
+
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          import urllib.request
+
+          repository = os.environ["PREPARED_SCENE_ARTIFACT_REPOSITORY"]
+          run_id = os.environ["PREPARED_SCENE_ARTIFACT_RUN_ID"]
+          artifact_name = os.environ["PREPARED_SCENE_ARTIFACT_NAME"]
+          token = os.environ["GH_TOKEN"]
+          artifacts_url = (
+              f"https://api.github.com/repos/{repository}/actions/runs/"
+              f"{run_id}/artifacts?per_page=100"
+          )
+          request = urllib.request.Request(
+              artifacts_url,
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {token}",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=60) as response:
+              payload = json.load(response)
+
+          matches = [
+              artifact
+              for artifact in payload.get("artifacts", [])
+              if artifact.get("name") == artifact_name
+          ]
+          if not matches:
+              available = ", ".join(
+                  sorted(artifact.get("name", "<unnamed>") for artifact in payload.get("artifacts", []))
+              )
+              raise SystemExit(
+                  f"Could not find prepared-scene artifact {artifact_name!r} "
+                  f"in {repository} run {run_id}. Available artifacts: {available}"
+              )
+
+          artifact = matches[0]
+          if artifact.get("expired"):
+              raise SystemExit(f"Prepared-scene artifact {artifact_name!r} is expired.")
+
+          with open("_prepared_scene_artifact_url.txt", "w", encoding="utf-8") as handle:
+              handle.write(str(artifact["archive_download_url"]))
+          print(
+              "Resolved prepared-scene artifact "
+              f"{artifact_name!r}: id={artifact.get('id')} size={artifact.get('size_in_bytes')} bytes"
+          )
+          PY
+
+          artifact_url="$(cat _prepared_scene_artifact_url.txt)"
+          curl --fail --location --show-error --retry 5 --retry-delay 10 \
+            --connect-timeout 30 --max-time 2400 --speed-limit 1024 --speed-time 120 \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output _prepared_scene_artifact.zip \
+            "${artifact_url}"
+          unzip -q _prepared_scene_artifact.zip -d _prepared_scene_artifact
+
+      - name: Restore prepared scene from artifact
+        shell: bash
+        run: |
+          if [ "${USE_PREPARED_SCENE_ARTIFACT:-false}" != "true" ]; then
+            echo "Skipping prepared-scene artifact restore."
+            exit 0
+          fi
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          import shutil
+          from pathlib import Path
+
+          artifact_root = Path("_prepared_scene_artifact")
+          scene_name = os.environ["PREPARED_SCENE"]
+          destination = Path("real_scenes") / scene_name
+
+          def has_scene_metadata(path: Path) -> bool:
+              return (path / "real_scene.json").is_file() and (path / "cameras.json").is_file() and (path / "splits.json").is_file()
+
+          candidates = [
+              artifact_root / "real_scenes" / scene_name,
+              artifact_root / scene_name,
+          ]
+          candidates.extend(path for path in artifact_root.rglob(scene_name) if path.is_dir())
+          scene_source = next((path for path in candidates if has_scene_metadata(path)), None)
+          if scene_source is None:
+              raise SystemExit(f"Could not find prepared scene {scene_name!r} in artifact {artifact_root}")
+
+          if destination.exists():
+              shutil.rmtree(destination)
+          destination.parent.mkdir(parents=True, exist_ok=True)
+          shutil.copytree(scene_source, destination)
+
+          downloads_source = artifact_root / "real_scenes" / "_downloads"
+          if not downloads_source.exists():
+              downloads_source = artifact_root / "_downloads"
+          if downloads_source.exists():
+              downloads_destination = Path("real_scenes") / "_downloads"
+              downloads_destination.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copytree(downloads_source, downloads_destination, dirs_exist_ok=True)
+
+          meta_path = destination / "real_scene.json"
+          meta = json.loads(meta_path.read_text(encoding="utf-8"))
+          source_scene = meta.get("source_scene")
+          tanks_temples = meta.get("tanks_temples")
+          if source_scene and isinstance(tanks_temples, dict):
+              local_download = Path("real_scenes") / "_downloads" / "tanks_temples" / str(source_scene)
+              replacements = {
+                  "alignment_path": local_download / "alignment" / f"{source_scene}.txt",
+                  "camera_log_path": local_download / "camera_poses" / f"{source_scene}.log",
+                  "crop_path": local_download / "crop" / f"{source_scene}.json",
+                  "ground_truth_path": local_download / "ground_truth" / f"{source_scene}.ply",
+                  "reconstruction_path": local_download / "reconstruction" / f"{source_scene}.ply",
+              }
+              for key, local_path in replacements.items():
+                  if local_path.exists():
+                      tanks_temples[key] = str(local_path)
+              if local_download.exists():
+                  meta["source_dir"] = str(local_download)
+              meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+
+          print(f"Restored prepared scene from artifact: {scene_source} -> {destination}")
+          PY
+
+      - name: Install GPIS-Splatting
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -e .
+
+      - name: Export prepared scene to COLMAP/3DGS layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "${OUTPUT_ROOT}"
+          mkdir -p "${OUTPUT_ROOT}"
+          export_prepared_scene_to_colmap_3dgs \
+            --scene "${PREPARED_SCENE}" \
+            --output-dir "${OUTPUT_ROOT}/colmap_scene" \
+            --split "${EXPORT_SPLIT}" \
+            --max-points "${MAX_POINTS}"
+
+      - name: Detect CUDA toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          for cuda_home in /usr/local/cuda /usr/local/cuda-12.6 /usr/local/cuda-12.4 /usr/local/cuda-12; do
+            if [ -x "${cuda_home}/bin/nvcc" ]; then
+              {
+                echo "CUDA_HOME=${cuda_home}"
+                echo "${cuda_home}/bin" >> "${GITHUB_PATH}"
+              } >> "${GITHUB_ENV}"
+              "${cuda_home}/bin/nvcc" --version
+              exit 0
+            fi
+          done
+          echo "No nvcc found. Reference Graphdeco training requires a CUDA toolkit." >&2
+          exit 3
+
+      - name: Prepare reference trainer
+        if: ${{ inputs.dry_run == false && inputs.train_command_template == '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "${OUTPUT_ROOT}/gaussian-splatting"
+          git clone --recursive "${TRAINER_REPOSITORY}" "${OUTPUT_ROOT}/gaussian-splatting"
+          cd "${OUTPUT_ROOT}/gaussian-splatting"
+          git checkout "${TRAINER_REF}"
+          git submodule update --init --recursive
+
+      - name: Install reference trainer dependencies
+        if: ${{ inputs.dry_run == false && inputs.install_reference_trainer == true && inputs.train_command_template == '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade --index-url "${PYTORCH_INDEX_URL}" torch torchvision torchaudio
+          python -m pip install plyfile tqdm opencv-python-headless
+          python -m pip install "${OUTPUT_ROOT}/gaussian-splatting/submodules/diff-gaussian-rasterization"
+          python -m pip install "${OUTPUT_ROOT}/gaussian-splatting/submodules/simple-knn"
+
+      - name: Write training command
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+
+          import os
+          from pathlib import Path
+
+          output_root = Path(os.environ["OUTPUT_ROOT"])
+          colmap_scene = output_root / "colmap_scene"
+          model_dir = output_root / "model"
+          trainer_dir = output_root / "gaussian-splatting"
+          iterations = os.environ["ITERATIONS"]
+          template = os.environ["TRAIN_COMMAND_TEMPLATE"].strip()
+          if template:
+              command = template.format(
+                  colmap_scene_dir=colmap_scene,
+                  model_dir=model_dir,
+                  iterations=iterations,
+                  trainer_dir=trainer_dir,
+                  prepared_scene=os.environ["PREPARED_SCENE"],
+              )
+          else:
+              command = (
+                  f"python {trainer_dir / 'train.py'} "
+                  f"-s {colmap_scene} "
+                  f"-m {model_dir} "
+                  f"--iterations {iterations} "
+                  f"--save_iterations {iterations} "
+                  "--test_iterations -1 "
+                  "--checkpoint_iterations -1"
+              )
+          script = output_root / "train_3dgs.sh"
+          script.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + command + "\n", encoding="utf-8")
+          script.chmod(0o755)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              handle.write(f"COLMAP_SCENE_DIR={colmap_scene}\n")
+              handle.write(f"MODEL_DIR={model_dir}\n")
+              handle.write(f"TRAIN_SCRIPT={script}\n")
+          print(command)
+          PY
+
+      - name: Train standard 3DGS baseline
+        if: ${{ inputs.dry_run == false }}
+        shell: bash
+        run: |
+          "${TRAIN_SCRIPT}"
+
+      - name: Resolve trained PLY
+        if: ${{ inputs.dry_run == false }}
+        shell: bash
+        run: |
+          python - <<'PY' >> "${GITHUB_ENV}"
+          from __future__ import annotations
+
+          import os
+          import re
+          from pathlib import Path
+
+          model_dir = Path(os.environ["MODEL_DIR"])
+          expected = model_dir / "point_cloud" / f"iteration_{os.environ['ITERATIONS']}" / "point_cloud.ply"
+          if expected.is_file():
+              ply_path = expected
+          else:
+              candidates = list(model_dir.rglob("point_cloud.ply"))
+              if not candidates:
+                  raise SystemExit(f"No trained point_cloud.ply found under {model_dir}")
+
+              def iteration_key(path: Path) -> tuple[int, str]:
+                  match = re.search(r"iteration_(\d+)", path.as_posix())
+                  return (int(match.group(1)) if match else -1, path.as_posix())
+
+              ply_path = sorted(candidates, key=iteration_key)[-1]
+          print(f"TRAINED_PLY_PATH={ply_path}")
+          PY
+
+      - name: Publish workflow summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "# Standard 3DGS baseline training"
+            echo
+            echo "- Prepared scene: \`${PREPARED_SCENE}\`"
+            echo "- Prepared scene local hit: \`${PREPARED_SCENE_LOCAL_HIT:-unknown}\`"
+            echo "- Used prepared-scene artifact: \`${USE_PREPARED_SCENE_ARTIFACT:-false}\`"
+            echo "- Export split: \`${EXPORT_SPLIT}\`"
+            echo "- Iterations: \`${ITERATIONS}\`"
+            echo "- Dry run: \`${DRY_RUN}\`"
+            echo "- Output root: \`${OUTPUT_ROOT}\`"
+            echo "- COLMAP scene: \`${COLMAP_SCENE_DIR:-${OUTPUT_ROOT}/colmap_scene}\`"
+            echo "- Model dir: \`${MODEL_DIR:-${OUTPUT_ROOT}/model}\`"
+            echo "- Trained PLY: \`${TRAINED_PLY_PATH:-not produced}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload 3DGS training artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact_name }}-${{ inputs.prepared_scene }}-i${{ inputs.iterations }}
+          path: |
+            ${{ inputs.output_root }}/colmap_scene/export_report.*
+            ${{ inputs.output_root }}/train_3dgs.sh
+            ${{ inputs.output_root }}/model/cfg_args
+            ${{ inputs.output_root }}/model/cameras.json
+            ${{ inputs.output_root }}/model/exposure.json
+            ${{ inputs.output_root }}/model/point_cloud/iteration_*/point_cloud.ply
+          if-no-files-found: warn
+          retention-days: 30

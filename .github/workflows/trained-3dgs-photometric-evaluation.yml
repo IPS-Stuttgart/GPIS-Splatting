@@ -26,9 +26,15 @@ on: # yamllint disable-line rule:truthy
         type: string
         default: IPS-Stuttgart/GPIS-Splatting
       trained_ply_path:
-        description: Path to a trained 3DGS point_cloud.ply on the self-hosted runner.
-        required: true
+        description: Path to a trained 3DGS point_cloud.ply on the self-hosted runner. Leave empty when restoring a trained-model artifact.
+        required: false
         type: string
+        default: ""
+      trained_model_artifact:
+        description: Optional trained-model artifact spec as run_id|name|repository|ply_path. Repository defaults to this repo; ply_path is optional.
+        required: false
+        type: string
+        default: ""
       gpis_model_path:
         description: GPIS model path, absolute or relative to the prepared scene.
         required: true
@@ -154,6 +160,7 @@ jobs:
       PREPARED_SCENE_ARTIFACT_NAME: ${{ inputs.prepared_scene_artifact_name }}
       PREPARED_SCENE_ARTIFACT_REPOSITORY: ${{ inputs.prepared_scene_artifact_repository }}
       TRAINED_PLY_PATH: ${{ inputs.trained_ply_path }}
+      TRAINED_MODEL_ARTIFACT_SPEC: ${{ inputs.trained_model_artifact }}
       GPIS_MODEL_PATH: ${{ inputs.gpis_model_path }}
       METHOD_NAME: ${{ inputs.method_name }}
       MAX_PRED_POINTS: ${{ inputs.max_pred_points }}
@@ -197,6 +204,58 @@ jobs:
         run: |
           if [ -z "${PREPARED_SCENE_ARTIFACT_RUN_ID}" ] || [ -z "${PREPARED_SCENE_ARTIFACT_NAME}" ]; then
             echo "prepared_scene_artifact_run_id and prepared_scene_artifact_name must be set together." >&2
+            exit 2
+          fi
+
+      - name: Parse trained-model artifact spec
+        shell: bash
+        run: |
+          python - <<'PY' | tee -a "${GITHUB_ENV}" > _trained_model_artifact.env
+          from __future__ import annotations
+
+          import os
+
+          spec = os.environ["TRAINED_MODEL_ARTIFACT_SPEC"].strip()
+          run_id = ""
+          name = ""
+          repository = "IPS-Stuttgart/GPIS-Splatting"
+          ply_path = ""
+          if spec:
+              parts = spec.split("|")
+              if len(parts) < 2 or len(parts) > 4:
+                  raise SystemExit(
+                      "trained_model_artifact must use run_id|name|repository|ply_path "
+                      "with repository and ply_path optional."
+                  )
+              run_id = parts[0].strip()
+              name = parts[1].strip()
+              if len(parts) >= 3 and parts[2].strip():
+                  repository = parts[2].strip()
+              if len(parts) >= 4 and parts[3].strip():
+                  ply_path = parts[3].strip()
+              if not run_id or not name:
+                  raise SystemExit("trained_model_artifact requires non-empty run_id and name.")
+          print(f"TRAINED_MODEL_ARTIFACT_RUN_ID={run_id}")
+          print(f"TRAINED_MODEL_ARTIFACT_NAME={name}")
+          print(f"TRAINED_MODEL_ARTIFACT_REPOSITORY={repository}")
+          print(f"TRAINED_MODEL_ARTIFACT_PLY_PATH={ply_path}")
+          PY
+          . _trained_model_artifact.env
+
+      - name: Validate trained-model source inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          has_artifact=false
+          if [ -n "${TRAINED_MODEL_ARTIFACT_RUN_ID}" ] || [ -n "${TRAINED_MODEL_ARTIFACT_NAME}" ]; then
+            if [ -z "${TRAINED_MODEL_ARTIFACT_RUN_ID}" ] || [ -z "${TRAINED_MODEL_ARTIFACT_NAME}" ]; then
+              echo "trained_model_artifact_run_id and trained_model_artifact_name must be set together." >&2
+              exit 2
+            fi
+            has_artifact=true
+          fi
+          if [ -z "${TRAINED_PLY_PATH}" ] && [ "${has_artifact}" != "true" ]; then
+            echo "Set trained_ply_path or provide a trained_model_artifact_run_id/name pair." >&2
             exit 2
           fi
 
@@ -382,6 +441,124 @@ jobs:
               meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
 
           print(f"Restored prepared scene from artifact: {scene_source} -> {destination}")
+          PY
+
+      - name: Download trained-model artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ -n "${TRAINED_PLY_PATH}" ] && [ -f "${TRAINED_PLY_PATH}" ]; then
+            echo "Using existing trained PLY at ${TRAINED_PLY_PATH}."
+            exit 0
+          fi
+          if [ -z "${TRAINED_MODEL_ARTIFACT_RUN_ID}" ] || [ -z "${TRAINED_MODEL_ARTIFACT_NAME}" ]; then
+            echo "Skipping trained-model artifact download."
+            exit 0
+          fi
+
+          rm -rf _trained_model_artifact _trained_model_artifact.zip
+          mkdir -p _trained_model_artifact
+
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          import urllib.request
+
+          repository = os.environ["TRAINED_MODEL_ARTIFACT_REPOSITORY"]
+          run_id = os.environ["TRAINED_MODEL_ARTIFACT_RUN_ID"]
+          artifact_name = os.environ["TRAINED_MODEL_ARTIFACT_NAME"]
+          token = os.environ["GH_TOKEN"]
+          artifacts_url = (
+              f"https://api.github.com/repos/{repository}/actions/runs/"
+              f"{run_id}/artifacts?per_page=100"
+          )
+          request = urllib.request.Request(
+              artifacts_url,
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {token}",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=60) as response:
+              payload = json.load(response)
+
+          matches = [
+              artifact
+              for artifact in payload.get("artifacts", [])
+              if artifact.get("name") == artifact_name
+          ]
+          if not matches:
+              available = ", ".join(
+                  sorted(artifact.get("name", "<unnamed>") for artifact in payload.get("artifacts", []))
+              )
+              raise SystemExit(
+                  f"Could not find trained-model artifact {artifact_name!r} "
+                  f"in {repository} run {run_id}. Available artifacts: {available}"
+              )
+
+          artifact = matches[0]
+          if artifact.get("expired"):
+              raise SystemExit(f"Trained-model artifact {artifact_name!r} is expired.")
+
+          with open("_trained_model_artifact_url.txt", "w", encoding="utf-8") as handle:
+              handle.write(str(artifact["archive_download_url"]))
+          print(
+              "Resolved trained-model artifact "
+              f"{artifact_name!r}: id={artifact.get('id')} size={artifact.get('size_in_bytes')} bytes"
+          )
+          PY
+
+          artifact_url="$(cat _trained_model_artifact_url.txt)"
+          curl --fail --location --show-error --retry 5 --retry-delay 10 \
+            --connect-timeout 30 --max-time 2400 --speed-limit 1024 --speed-time 120 \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output _trained_model_artifact.zip \
+            "${artifact_url}"
+          unzip -q _trained_model_artifact.zip -d _trained_model_artifact
+
+      - name: Resolve trained PLY from artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${TRAINED_PLY_PATH}" ] && [ -f "${TRAINED_PLY_PATH}" ]; then
+            echo "Using existing trained PLY at ${TRAINED_PLY_PATH}."
+            exit 0
+          fi
+          if [ ! -d _trained_model_artifact ]; then
+            echo "No trained-model artifact was restored."
+            exit 0
+          fi
+          python - <<'PY' >> "${GITHUB_ENV}"
+          from __future__ import annotations
+
+          import os
+          import re
+          from pathlib import Path
+
+          artifact_root = Path("_trained_model_artifact")
+          relative_path = os.environ["TRAINED_MODEL_ARTIFACT_PLY_PATH"].strip()
+          if relative_path:
+              ply_path = artifact_root / relative_path
+              if not ply_path.is_file():
+                  raise SystemExit(f"Configured trained_model_artifact_ply_path does not exist: {ply_path}")
+          else:
+              candidates = list(artifact_root.rglob("point_cloud.ply"))
+              if not candidates:
+                  raise SystemExit(f"No point_cloud.ply found in trained-model artifact {artifact_root}")
+
+              def iteration_key(path: Path) -> tuple[int, str]:
+                  match = re.search(r"iteration_(\d+)", path.as_posix())
+                  return (int(match.group(1)) if match else -1, path.as_posix())
+
+              ply_path = sorted(candidates, key=iteration_key)[-1]
+          print(f"TRAINED_PLY_PATH={ply_path}")
           PY
 
       - name: Install package and dependencies
@@ -612,6 +789,8 @@ jobs:
             echo "- Prepared scene: \`${PREPARED_SCENE}\`"
             echo "- Prepared scene artifact: \`${PREPARED_SCENE_ARTIFACT_NAME:-none}\`"
             echo "- Prepared scene artifact run: \`${PREPARED_SCENE_ARTIFACT_RUN_ID:-none}\`"
+            echo "- Trained model artifact: \`${TRAINED_MODEL_ARTIFACT_NAME:-none}\`"
+            echo "- Trained model artifact run: \`${TRAINED_MODEL_ARTIFACT_RUN_ID:-none}\`"
             echo "- Trained PLY: \`${TRAINED_PLY_PATH}\`"
             echo "- Manifest: \`${MANIFEST_PATH}\`"
             echo "- Calibrated gate: \`${CALIBRATED_GATE_PATH}\`"
