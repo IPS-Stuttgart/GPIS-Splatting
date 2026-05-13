@@ -10,6 +10,11 @@ on: # yamllint disable-line rule:truthy
         required: true
         type: string
         default: barn_selfhosted_m25000_t2500_s12
+      runs_on_json:
+        description: JSON array for runs-on, e.g. ["self-hosted","Linux"] or ["self-hosted","Linux","nvidia-smi"].
+        required: true
+        type: string
+        default: '["self-hosted","Linux"]'
       prepared_scene_artifact_run_id:
         description: Optional workflow run ID containing a prepared-scene artifact to restore before training.
         required: false
@@ -91,9 +96,7 @@ permissions:
 jobs:
   train:
     name: ${{ inputs.prepared_scene }} standard 3DGS baseline
-    runs-on:
-      - self-hosted
-      - Linux
+    runs-on: ${{ fromJSON(inputs.runs_on_json) }}
     timeout-minutes: 1440
 
     env:
