@@ -66,6 +66,7 @@ render_3dgs_with_gsplat = "gpis_splatting.cli.render_3dgs_with_gsplat:main"
 validate_3dgs_baseline_photometry = "gpis_splatting.cli.validate_3dgs_baseline_photometry:main"
 export_gpis_training_prior = "gpis_splatting.cli.export_gpis_training_prior:main"
 export_gpis_training_policy = "gpis_splatting.cli.export_gpis_training_policy:main"
+write_graphdeco_gpis_patch = "gpis_splatting.cli.write_graphdeco_gpis_patch:main"
 write_reproducibility_report = "gpis_splatting.cli.write_reproducibility_report:main"
 
 [tool.pytest.ini_options]
