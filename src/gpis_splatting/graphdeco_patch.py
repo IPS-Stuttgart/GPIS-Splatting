@@ -25,6 +25,11 @@ def graphdeco_train_py_patch(config: GraphdecoGpisPatchConfig | None = None) -> 
     reviewable patch fragment with stable insertion anchors instead of mutating an
     external checkout in-place. The fragment covers imports, CLI flags, regularizer
     construction, loss augmentation, logging, and optional density-control hooks.
+
+    Hook ordering matters: the GPIS loss is added before backward, densification-stat
+    boosting is applied only after Graphdeco has updated ``xyz_gradient_accum`` via
+    ``add_densification_stats``, and GPIS pruning runs after the optimizer step so it
+    does not invalidate gradients or optimizer-state reads from the current iteration.
     """
     cfg = GraphdecoGpisPatchConfig() if config is None else config
     return f"""diff --git a/train.py b/train.py
@@ -78,23 +83,39 @@ def graphdeco_train_py_patch(config: GraphdecoGpisPatchConfig | None = None) -> 
 +        )
 +        gpis_loop = GPIS3DGSOptimizationLoop(
 +            gpis_regularizer,
-+            GPIS3DGSOptimizationLoopConfig(step_optimizer=False, apply_densification_boost=True, apply_pruning=True),
++            GPIS3DGSOptimizationLoopConfig(step_optimizer=False, apply_densification_boost=True, apply_pruning=True, prune_after_optimizer_step=True),
 +        )
 @@
 -        loss.backward()
++        gpis_train_step = None
++        gpis_step = None
 +        if gpis_loop is None:
 +            loss.backward()
-+            gpis_step = None
 +        else:
 +            gpis_train_step = gpis_loop.augment_loss(base_loss=loss, gaussians=gaussians, iteration=iteration)
 +            gpis_train_step.total_loss.backward()
-+            gpis_loop.after_backward(gaussians, gpis_train_step)
 +            gpis_step = gpis_train_step.gpis_step
 +            loss = gpis_train_step.total_loss
 @@
          with torch.no_grad():
-+            if gpis_loop is not None and gpis_step is not None:
-+                gpis_loop.after_optimizer_step(gaussians, gpis_train_step)
+@@
++            if tb_writer is not None and gpis_step is not None:
++                for name, value in gpis_step.log_dict().items():
++                    tb_writer.add_scalar(name, float(value.detach().cpu()), iteration)
++
+             # Densification
+             if iteration < opt.densify_until_iter:
+@@
+                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
+                 gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
++                if gpis_loop is not None and gpis_train_step is not None:
++                    gpis_loop.after_backward(gaussians, gpis_train_step)
+@@
+                 else:
+                     gaussians.optimizer.step()
+                     gaussians.optimizer.zero_grad(set_to_none = True)
++                if gpis_loop is not None and gpis_train_step is not None:
++                    gpis_loop.after_optimizer_step(gaussians, gpis_train_step)
 @@
  if __name__ == "__main__":
 @@
@@ -138,7 +159,17 @@ Generate the patch fragment:
 write_graphdeco_gpis_patch --output patches/graphdeco_gpis_regularizer.patch --guide docs/graphdeco_gpis_patch.md
 ```
 
-Apply it to a local `graphdeco-inria/gaussian-splatting` checkout manually or with `git apply` after resolving any upstream-context drift.
+Apply it to a local `graphdeco-inria/gaussian-splatting` checkout manually or with `git apply` after resolving any upstream-context drift. The patch is intentionally reviewable because upstream Graphdeco `train.py` evolves.
+
+## Hook-order checks
+
+Keep the hook order as generated:
+
+1. add the GPIS loss before `backward()`;
+2. call `gpis_loop.after_backward(...)` after `gaussians.add_densification_stats(...)` and before Graphdeco densification/pruning;
+3. call `gpis_loop.after_optimizer_step(...)` after `gaussians.optimizer.step()`.
+
+This avoids boosting stale densification statistics and avoids pruning Gaussians before the optimizer has consumed the current gradients.
 
 ## Conservative first run
 
