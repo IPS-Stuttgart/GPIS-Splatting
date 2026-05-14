@@ -37,6 +37,18 @@ python -m gpis_splatting.cli.run_experiment_matrix `
 
 Use `--fail-on-missing` when the report should fail unless all six cases have at least one matched artifact row.
 
+## Adding backend-benchmark evidence
+
+`benchmark_gpis_backends` writes speed and dense-reference-deviation artifacts for the GPIS backend used before large trained-3DGS scoring runs. Append those rows to a generated matrix report with:
+
+```powershell
+python -m gpis_splatting.cli.append_backend_benchmark_to_matrix_report `
+  --matrix-report real_scenes\ignatius_tnt64\evaluations\ignatius_af_matrix\ignatius_af_matrix_report.md `
+  --backend-benchmark experiments\gpis_backend_benchmark_smoke\smoke_backend_benchmark.csv
+```
+
+Use `--output-report` to keep the original matrix report unchanged and write a combined report elsewhere.
+
 ## Artifact roles
 
 The supported artifact roles are:
