@@ -16,6 +16,8 @@ on: # yamllint disable-line rule:truthy
       - ".github/workflows/gpis-splatting-ci.yml"
       - ".github/workflows/calibrated-confidence.yml"
       - ".github/workflows/trained-3dgs-photometric-evaluation.yml"
+      - ".github/workflows/nightly-cpu-evidence.yml"
+      - ".github/workflows/self-hosted-gpu-smoke.yml"
   pull_request:
     branches:
       - main
@@ -30,6 +32,8 @@ on: # yamllint disable-line rule:truthy
       - ".github/workflows/gpis-splatting-ci.yml"
       - ".github/workflows/calibrated-confidence.yml"
       - ".github/workflows/trained-3dgs-photometric-evaluation.yml"
+      - ".github/workflows/nightly-cpu-evidence.yml"
+      - ".github/workflows/self-hosted-gpu-smoke.yml"
   workflow_dispatch:
 
 permissions:
@@ -193,12 +197,19 @@ jobs:
           prepare_real_scene --help > /dev/null
           validate_real_scene --help > /dev/null
           evaluate_real_renders --help > /dev/null
+          evaluate_render_consistency --help > /dev/null
           download_real_scene --help > /dev/null
           bootstrap_real_gpis --help > /dev/null
+          initialize_gpis_splats --help > /dev/null
           fit_real_gpis --help > /dev/null
+          augment_depth_normal_supervision --help > /dev/null
+          initialize_gpis_zero_level_splats --help > /dev/null
           render_real_splats --help > /dev/null
+          audit_real_renders --help > /dev/null
           run_real_evaluation --help > /dev/null
           diagnose_real_render --help > /dev/null
+          diagnose_real_alignment --help > /dev/null
+          run_real_render_parameter_sweep --help > /dev/null
           download_tanks_temples_scene --help > /dev/null
           prepare_tanks_temples_scene --help > /dev/null
           evaluate_tanks_temples_geometry --help > /dev/null
@@ -207,6 +218,8 @@ jobs:
           run_real_gpis_gate_model_sweep --help > /dev/null
           diagnose_tanks_temples_gpis_field_scores --help > /dev/null
           calibrate_gpis_splat_scores --help > /dev/null
+          apply_calibrated_confidence --help > /dev/null
+          fit_calibrated_confidence --help > /dev/null
           run_tanks_temples_hard_negative_calibration --help > /dev/null
           run_tanks_temples_calibrated_splat_filtering --help > /dev/null
           run_tanks_temples_calibrated_confidence --help > /dev/null
@@ -216,6 +229,13 @@ jobs:
           export_3dgs_gpis_variants --help > /dev/null
           evaluate_3dgs_variant_renders --help > /dev/null
           render_3dgs_with_gsplat --help > /dev/null
+          validate_3dgs_baseline_photometry --help > /dev/null
+          run_trained_3dgs_gpis_experiment --help > /dev/null
+          export_gpis_training_prior --help > /dev/null
+          export_gpis_training_policy --help > /dev/null
+          benchmark_gpis_backends --help > /dev/null
+          write_graphdeco_gpis_patch --help > /dev/null
+          write_reproducibility_report --help > /dev/null
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v7
