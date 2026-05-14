@@ -21,6 +21,21 @@ def test_graphdeco_patch_contains_regularizer_flags_and_hooks() -> None:
     assert "gpis_densification_gradient_boost" in patch
 
 
+def test_graphdeco_patch_places_density_hooks_at_safe_anchors() -> None:
+    patch = graphdeco_train_py_patch()
+
+    assert "gpis_train_step = None" in patch
+    assert "gpis_loop.augment_loss" in patch
+    assert "gpis_train_step.total_loss.backward()" in patch
+    assert "gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)" in patch
+    assert "gpis_loop.after_backward(gaussians, gpis_train_step)" in patch
+    assert "gaussians.optimizer.step()" in patch
+    assert "gpis_loop.after_optimizer_step(gaussians, gpis_train_step)" in patch
+    assert patch.index("gpis_train_step.total_loss.backward()") < patch.index("gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)")
+    assert patch.index("gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)") < patch.index("gpis_loop.after_backward(gaussians, gpis_train_step)")
+    assert patch.index("gaussians.optimizer.step()") < patch.index("gpis_loop.after_optimizer_step(gaussians, gpis_train_step)")
+
+
 def test_graphdeco_guide_and_bundle_are_written(tmp_path: Path) -> None:
     patch_path = tmp_path / "patches" / "graphdeco_gpis_regularizer.patch"
     guide_path = tmp_path / "docs" / "graphdeco_gpis_patch.md"
@@ -34,3 +49,4 @@ def test_graphdeco_guide_and_bundle_are_written(tmp_path: Path) -> None:
     assert "--gpis_model" in patch_path.read_text(encoding="utf-8")
     assert "experiment-matrix case E" in guide_path.read_text(encoding="utf-8")
     assert "regularized_3dgs_render_comparison" in graphdeco_integration_guide()
+    assert "Hook-order checks" in graphdeco_integration_guide()

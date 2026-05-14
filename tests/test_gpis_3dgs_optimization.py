@@ -4,6 +4,11 @@ import torch
 
 from gpis_splatting.gpis_3dgs_optimization import GPIS3DGSOptimizationLoop, GPIS3DGSOptimizationLoopConfig
 from gpis_splatting.gpis_3dgs_regularization import GPIS3DGSRegularizationStep
+from gpis_splatting.gpis_3dgs_training_prior import (
+    GPIS3DGSTrainingPriorConfig,
+    GPIS3DGSTrainingPriorRegularizer,
+    GPIS3DGSTrainingPriorState,
+)
 
 
 class DummyRegularizer:
@@ -69,6 +74,18 @@ class LegacyOptimizer:
         self.zero_grad_calls += 1
         for parameter in self.param_groups[0]["params"]:
             parameter.grad = None
+
+
+def make_prior_state() -> GPIS3DGSTrainingPriorState:
+    return GPIS3DGSTrainingPriorState(
+        gate=torch.tensor([1.0, 0.1], dtype=torch.float64),
+        densify_weight=torch.tensor([0.0, 0.5], dtype=torch.float64),
+        densify_candidate_mask=torch.tensor([False, True]),
+        prune_weight=torch.tensor([0.0, 1.0], dtype=torch.float64),
+        prune_candidate_mask=torch.tensor([False, True]),
+        opacity_target_alpha=torch.tensor([1.0, 0.0], dtype=torch.float64),
+        opacity_regularization_weight=torch.tensor([0.0, 1.0], dtype=torch.float64),
+    )
 
 
 def test_step_combines_photometric_and_gpis_losses_in_one_backward_pass() -> None:
@@ -171,3 +188,42 @@ def test_invalid_scalar_loss_is_rejected() -> None:
         assert "must be scalar" in str(exc)
     else:
         raise AssertionError("Expected non-scalar base_loss to be rejected.")
+
+
+def test_optimization_loop_accepts_precomputed_training_prior_regularizer() -> None:
+    centers = torch.zeros((2, 3), dtype=torch.float64, requires_grad=True)
+    opacities = torch.tensor([0.8, 0.8], dtype=torch.float64, requires_grad=True)
+    base_loss = centers.square().sum()
+
+    regularizer = GPIS3DGSTrainingPriorRegularizer(
+        make_prior_state(),
+        GPIS3DGSTrainingPriorConfig(
+            opacity_weight=0.5,
+            max_regularized_gaussians=None,
+            sample_mode="all",
+        ),
+    )
+    loop = GPIS3DGSOptimizationLoop(regularizer)
+
+    step = loop.augment_loss(
+        base_loss=base_loss,
+        centers=centers,
+        opacities=opacities,
+        iteration=0,
+    )
+
+    assert step.gpis_step is not None
+    assert step.total_loss > base_loss
+    step.total_loss.backward()
+    assert opacities.grad is not None
+    assert torch.all(torch.isfinite(opacities.grad))
+
+
+def test_optimization_loop_can_notify_prior_about_external_pruning() -> None:
+    regularizer = GPIS3DGSTrainingPriorRegularizer(make_prior_state())
+    loop = GPIS3DGSOptimizationLoop(regularizer)
+
+    loop.after_external_prune_mask(torch.tensor([False, True]))
+
+    assert regularizer.state.gaussian_count == 1
+    assert regularizer.state.gate.tolist() == [1.0]

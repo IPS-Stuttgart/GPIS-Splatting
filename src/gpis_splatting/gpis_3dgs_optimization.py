@@ -2,15 +2,55 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 import torch
-
-from gpis_splatting.gpis_3dgs_regularization import GPIS3DGSRegularizationStep, GPIS3DGSTrainingRegularizer
 
 Tensor = torch.Tensor
 OptimizerLike = Any
 StepCallback = Callable[["GPIS3DGSOptimizationStep"], None]
+
+
+class GPIS3DGSRegularizationStepLike(Protocol):
+    """Minimal scalar-loss result consumed by the 3DGS optimization adapter."""
+
+    loss: Tensor
+
+    def log_dict(self, prefix: str = "gpis") -> dict[str, Tensor]:
+        ...
+
+
+class GPIS3DGSRegularizerLike(Protocol):
+    """Common interface shared by live GPIS and precomputed GPIS-prior regularizers."""
+
+    def compute(
+        self,
+        gaussians: Any | None = None,
+        *,
+        iteration: int,
+        centers: Tensor | None = None,
+        opacities: Tensor | None = None,
+        gaussian_normals: Tensor | None = None,
+    ) -> GPIS3DGSRegularizationStepLike | None:
+        ...
+
+    def maybe_boost_densification_stats(
+        self,
+        gaussians: Any,
+        step: GPIS3DGSRegularizationStepLike,
+        *,
+        iteration: int,
+    ) -> Tensor | None:
+        ...
+
+    def maybe_prune(
+        self,
+        gaussians: Any,
+        step: GPIS3DGSRegularizationStepLike,
+        *,
+        iteration: int,
+    ) -> Tensor | None:
+        ...
 
 
 @dataclass(frozen=True)
@@ -41,7 +81,7 @@ class GPIS3DGSOptimizationStep:
     iteration: int
     base_loss: Tensor
     total_loss: Tensor
-    gpis_step: GPIS3DGSRegularizationStep | None
+    gpis_step: GPIS3DGSRegularizationStepLike | None
     density_boost_weights: Tensor | None = None
     prune_mask: Tensor | None = None
     grad_norm: Tensor | None = None
@@ -68,7 +108,12 @@ class GPIS3DGSOptimizationStep:
 
 
 class GPIS3DGSOptimizationLoop:
-    """Combine a standard 3DGS loss with GPIS loss and density-control hooks.
+    """Combine a standard 3DGS loss with a GPIS-compatible loss and density hooks.
+
+    ``regularizer`` may be the live :class:`GPIS3DGSTrainingRegularizer` or a
+    precomputed-prior adapter such as ``GPIS3DGSTrainingPriorRegularizer``. Both expose
+    the same small protocol: ``compute``, ``maybe_boost_densification_stats`` and
+    ``maybe_prune``.
 
     Typical use inside a 3DGS trainer::
 
@@ -85,7 +130,7 @@ class GPIS3DGSOptimizationLoop:
 
     def __init__(
         self,
-        regularizer: GPIS3DGSTrainingRegularizer,
+        regularizer: GPIS3DGSRegularizerLike,
         config: GPIS3DGSOptimizationLoopConfig | None = None,
     ) -> None:
         self.regularizer = regularizer
@@ -102,7 +147,7 @@ class GPIS3DGSOptimizationLoop:
         opacities: Tensor | None = None,
         gaussian_normals: Tensor | None = None,
     ) -> GPIS3DGSOptimizationStep:
-        """Add the scheduled GPIS loss to a scalar 3DGS photometric/base loss."""
+        """Add the scheduled GPIS-compatible loss to a scalar 3DGS photometric/base loss."""
         _validate_scalar_loss(base_loss, name="base_loss")
         gpis_step = self.regularizer.compute(
             gaussians,
@@ -151,6 +196,18 @@ class GPIS3DGSOptimizationLoop:
         if self.config.apply_pruning and self.config.prune_after_optimizer_step:
             step.prune_mask = self.regularizer.maybe_prune(gaussians, step.gpis_step, iteration=step.iteration)
         return step
+
+    def after_external_prune_mask(self, prune_mask: Tensor) -> None:
+        """Notify stateful regularizers about pruning performed by an external trainer.
+
+        Live GPIS regularization is stateless with respect to Gaussian identity, so this
+        is a no-op there. Precomputed GPIS-prior regularizers use it to keep gate,
+        densify, prune and opacity-target arrays aligned after the trainer removes
+        Gaussians through its own pruning logic.
+        """
+        apply_prune_mask = getattr(self.regularizer, "apply_prune_mask", None)
+        if callable(apply_prune_mask):
+            apply_prune_mask(prune_mask)
 
     def step(
         self,
@@ -243,5 +300,7 @@ __all__ = [
     "GPIS3DGSOptimizationLoop",
     "GPIS3DGSOptimizationLoopConfig",
     "GPIS3DGSOptimizationStep",
+    "GPIS3DGSRegularizationStepLike",
+    "GPIS3DGSRegularizerLike",
     "validate_optimization_loop_config",
 ]
