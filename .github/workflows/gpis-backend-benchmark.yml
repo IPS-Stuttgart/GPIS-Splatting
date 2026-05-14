@@ -1,0 +1,116 @@
+---
+name: GPIS Backend Benchmark
+
+on: # yamllint disable-line rule:truthy
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/gpis_splatting/gpis.py"
+      - "src/gpis_splatting/gpis_backends.py"
+      - "src/gpis_splatting/backend_benchmark.py"
+      - "src/gpis_splatting/cli/benchmark_gpis_backends.py"
+      - "tests/test_gpis_backends.py"
+      - "tests/test_backend_benchmark.py"
+      - "docs/gpis_backend_benchmark.md"
+      - "requirements-dev.txt"
+      - "pyproject.toml"
+      - ".github/workflows/gpis-backend-benchmark.yml"
+  workflow_dispatch:
+    inputs:
+      benchmark_name:
+        description: Output benchmark artifact prefix.
+        required: true
+        type: string
+        default: ci_backend_benchmark
+      n_train:
+        description: Number of GPIS training observations.
+        required: true
+        type: string
+        default: "256"
+      n_query:
+        description: Number of GPIS query points.
+        required: true
+        type: string
+        default: "128"
+      shape:
+        description: Analytic pseudo-SDF shape.
+        required: true
+        type: choice
+        default: sphere
+        options:
+          - sphere
+          - torus
+          - wavy_plane
+
+permissions:
+  contents: read
+
+jobs:
+  backend-benchmark:
+    name: GPIS backend benchmark
+    runs-on: ubuntu-latest
+    env:
+      BENCHMARK_NAME: ${{ github.event.inputs.benchmark_name || 'ci_backend_benchmark' }}
+      BENCHMARK_SHAPE: ${{ github.event.inputs.shape || 'sphere' }}
+      N_TRAIN: ${{ github.event.inputs.n_train || '256' }}
+      N_QUERY: ${{ github.event.inputs.n_query || '128' }}
+      OUTPUT_DIR: backend_benchmark_runs
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -e .
+
+      - name: Run focused backend benchmark tests
+        run: python -m pytest tests/test_backend_benchmark.py -q
+
+      - name: Run backend benchmark
+        run: |
+          python -m gpis_splatting.cli.benchmark_gpis_backends \
+            --output-dir "${OUTPUT_DIR}" \
+            --benchmark-name "${BENCHMARK_NAME}" \
+            --shape "${BENCHMARK_SHAPE}" \
+            --n-train "${N_TRAIN}" \
+            --n-query "${N_QUERY}" \
+            --num-neighbors 32 \
+            --num-inducing 64 \
+            --fit-batch-size 512 \
+            --batch-size 512
+
+      - name: Check backend benchmark status
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          status_path = Path(os.environ["OUTPUT_DIR"]) / f"{os.environ['BENCHMARK_NAME']}_status.json"
+          status = json.loads(status_path.read_text(encoding="utf-8"))
+          if not status.get("ok", False):
+              raise SystemExit(f"Backend benchmark failed status check: {status}")
+          PY
+
+      - name: Publish backend benchmark report to job summary
+        run: cat "${OUTPUT_DIR}/${BENCHMARK_NAME}_report.md" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload backend benchmark artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: gpis-backend-benchmark-${{ env.BENCHMARK_NAME }}
+          path: |
+            ${{ env.OUTPUT_DIR }}/${{ env.BENCHMARK_NAME }}.csv
+            ${{ env.OUTPUT_DIR }}/${{ env.BENCHMARK_NAME }}_config.json
+            ${{ env.OUTPUT_DIR }}/${{ env.BENCHMARK_NAME }}_report.md
+            ${{ env.OUTPUT_DIR }}/${{ env.BENCHMARK_NAME }}_status.json
