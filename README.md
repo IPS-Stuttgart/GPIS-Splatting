@@ -382,6 +382,8 @@ layout, runs either the reference Graphdeco trainer or a supplied command templa
 `point_cloud/iteration_<n>/point_cloud.ply`, and uploads the trained model artifact. The downstream
 **Trained 3DGS Photometric Evaluation** workflow can restore that artifact through `trained_model_artifact` using
 `run_id|artifact_name|repository|relative_ply_path`, or it can continue to consume an explicit runner-local `trained_ply_path`.
+For non-dry training runs, the workflow checks `nvidia-smi` and `nvcc` before downloading large prepared-scene artifacts. Use
+`runs_on_json` to pin the job to a known GPU runner label, for example `["self-hosted","Linux","nvidia-smi"]`.
 
 ```powershell
 convert_3dgs_ply_to_splats `

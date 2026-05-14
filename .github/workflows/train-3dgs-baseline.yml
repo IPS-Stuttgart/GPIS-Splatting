@@ -139,6 +139,46 @@ jobs:
             exit 2
           fi
 
+      - name: Preflight GPU runtime and CUDA compiler
+        if: ${{ inputs.dry_run == false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Runner: ${RUNNER_NAME:-unknown} (${RUNNER_OS:-unknown})"
+          if ! command -v nvidia-smi >/dev/null 2>&1; then
+            echo "::error::nvidia-smi is not on PATH. Use a CUDA-capable runner for non-dry 3DGS training."
+            exit 3
+          fi
+
+          if ! nvidia-smi; then
+            echo "::error::nvidia-smi failed. Check the NVIDIA driver, loaded kernel module, and NVML userspace library versions."
+            if [ -r /proc/driver/nvidia/version ]; then
+              cat /proc/driver/nvidia/version
+            fi
+            exit 3
+          fi
+
+          gpu_count="$(nvidia-smi --query-gpu=name --format=csv,noheader | sed '/^[[:space:]]*$/d' | wc -l)"
+          if [ "${gpu_count}" -lt 1 ]; then
+            echo "::error::No NVIDIA GPUs were reported by nvidia-smi."
+            exit 3
+          fi
+          nvidia-smi --query-gpu=index,name,driver_version,memory.total --format=csv
+
+          for cuda_home in /usr/local/cuda /usr/local/cuda-12.9 /usr/local/cuda-12.8 /usr/local/cuda-12.6 /usr/local/cuda-12.4 /usr/local/cuda-12; do
+            if [ -x "${cuda_home}/bin/nvcc" ]; then
+              {
+                echo "CUDA_HOME=${cuda_home}"
+                echo "${cuda_home}/bin" >> "${GITHUB_PATH}"
+              } >> "${GITHUB_ENV}"
+              "${cuda_home}/bin/nvcc" --version
+              exit 0
+            fi
+          done
+
+          echo "::error::No nvcc found. Reference Graphdeco training requires a CUDA toolkit."
+          exit 3
+
       - name: Select prepared-scene source
         shell: bash
         run: |
@@ -337,7 +377,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for cuda_home in /usr/local/cuda /usr/local/cuda-12.6 /usr/local/cuda-12.4 /usr/local/cuda-12; do
+          for cuda_home in /usr/local/cuda /usr/local/cuda-12.9 /usr/local/cuda-12.8 /usr/local/cuda-12.6 /usr/local/cuda-12.4 /usr/local/cuda-12; do
             if [ -x "${cuda_home}/bin/nvcc" ]; then
               {
                 echo "CUDA_HOME=${cuda_home}"
