@@ -1,0 +1,228 @@
+---
+name: Self-hosted GPU Smoke
+
+on: # yamllint disable-line rule:truthy
+  workflow_dispatch:
+    inputs:
+      runs_on_json:
+        description: JSON array for runs-on, e.g. ["self-hosted","Linux"] or ["self-hosted","Linux","nvidia-smi"].
+        required: true
+        type: string
+        default: '["self-hosted","Linux"]'
+      prepared_scene:
+        description: Optional prepared scene under real_scenes/ for one-frame gsplat rendering.
+        required: false
+        type: string
+        default: ""
+      trained_ply_path:
+        description: Optional trained 3DGS point_cloud.ply path on the self-hosted runner.
+        required: false
+        type: string
+        default: ""
+      reference_renders_dir:
+        description: Optional trusted renderer output directory for baseline photometry agreement.
+        required: false
+        type: string
+        default: ""
+      max_frames:
+        description: Number of frames to render when prepared_scene and trained_ply_path are supplied.
+        required: true
+        type: number
+        default: 1
+      max_gaussians:
+        description: Gaussian cap for smoke rendering. Use 0 to render all Gaussians.
+        required: true
+        type: number
+        default: 20000
+      install_gsplat_extra:
+        description: Install the package with the optional gsplat extra.
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-hosted-gpu-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gpu-smoke:
+    name: GPU runtime, 3DGS interop, and optional gsplat render
+    runs-on: ${{ fromJSON(inputs.runs_on_json) }}
+    timeout-minutes: 180
+    env:
+      PREPARED_SCENE: ${{ inputs.prepared_scene }}
+      TRAINED_PLY_PATH: ${{ inputs.trained_ply_path }}
+      REFERENCE_RENDERS_DIR: ${{ inputs.reference_renders_dir }}
+      MAX_FRAMES: ${{ inputs.max_frames }}
+      MAX_GAUSSIANS: ${{ inputs.max_gaussians }}
+      OUTPUT_ROOT: _gpu_smoke
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          clean: false
+
+      - name: Set up Python
+        # Keep v5 on self-hosted runners; v6 has been flaky on temporary GPU runners.
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            pyproject.toml
+
+      - name: Preflight NVIDIA runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Runner: ${RUNNER_NAME:-unknown} (${RUNNER_OS:-unknown})"
+          if ! command -v nvidia-smi >/dev/null 2>&1; then
+            echo "::error::nvidia-smi is not on PATH. Use a CUDA-capable runner."
+            exit 3
+          fi
+          nvidia-smi
+          gpu_count="$(nvidia-smi --query-gpu=name --format=csv,noheader | sed '/^[[:space:]]*$/d' | wc -l)"
+          if [ "${gpu_count}" -lt 1 ]; then
+            echo "::error::No NVIDIA GPUs were reported by nvidia-smi."
+            exit 3
+          fi
+          nvidia-smi --query-gpu=index,name,driver_version,memory.total --format=csv
+
+      - name: Install package and optional gsplat backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          if [ "${{ inputs.install_gsplat_extra }}" = "true" ]; then
+            python -m pip install -e ".[gsplat]"
+          else
+            python -m pip install -e .
+          fi
+
+      - name: Verify torch CUDA and gsplat import
+        shell: bash
+        run: |
+          python - <<'PY'
+          import torch
+
+          if not torch.cuda.is_available():
+              raise SystemExit("torch.cuda.is_available() is false on the selected runner.")
+          print(f"torch={torch.__version__}")
+          print(f"cuda={torch.version.cuda}")
+          print(f"gpu={torch.cuda.get_device_name(0)}")
+
+          import gsplat  # noqa: F401
+
+          print("gsplat import ok")
+          PY
+
+      - name: Run 3DGS interop unit tests
+        run: python -m pytest tests/test_external_3dgs.py -q
+
+      - name: Decide whether to run one-frame gsplat render
+        shell: bash
+        run: |
+          if [ -n "${PREPARED_SCENE}" ] && [ -n "${TRAINED_PLY_PATH}" ]; then
+            echo "RUN_GSPLAT_RENDER=true" >> "${GITHUB_ENV}"
+          else
+            echo "RUN_GSPLAT_RENDER=false" >> "${GITHUB_ENV}"
+            echo "Skipping render: prepared_scene and trained_ply_path were not both supplied."
+          fi
+
+      - name: Validate optional render inputs
+        if: env.RUN_GSPLAT_RENDER == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCENE_DIR="real_scenes/${PREPARED_SCENE}"
+          if [ ! -f "${TRAINED_PLY_PATH}" ]; then
+            echo "::error::trained_ply_path does not exist: ${TRAINED_PLY_PATH}"
+            exit 2
+          fi
+          for required in "${SCENE_DIR}/real_scene.json" "${SCENE_DIR}/cameras.json" "${SCENE_DIR}/splits.json"; do
+            if [ ! -f "${required}" ]; then
+              echo "::error::Prepared-scene metadata missing: ${required}"
+              exit 2
+            fi
+          done
+          echo "SCENE_DIR=${SCENE_DIR}" >> "${GITHUB_ENV}"
+
+      - name: Render one-frame trained 3DGS baseline with gsplat
+        if: env.RUN_GSPLAT_RENDER == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARGS=(
+            --input-ply "${TRAINED_PLY_PATH}"
+            --scene-dir "${SCENE_DIR}"
+            --output-dir "${OUTPUT_ROOT}/gsplat_3dgs"
+            --split test
+            --projection-convention auto
+            --color-mode auto
+            --sh-degree auto
+            --strict-3dgs-fidelity true
+            --device cuda:0
+            --max-frames "${MAX_FRAMES}"
+          )
+          if [ "${MAX_GAUSSIANS}" -gt 0 ]; then
+            ARGS+=(--max-gaussians "${MAX_GAUSSIANS}")
+          fi
+          python -m gpis_splatting.cli.render_3dgs_with_gsplat "${ARGS[@]}"
+
+      - name: Validate baseline photometry when optional render inputs are supplied
+        if: env.RUN_GSPLAT_RENDER == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARGS=(
+            --input-ply "${TRAINED_PLY_PATH}"
+            --scene-dir "${SCENE_DIR}"
+            --output-dir "${OUTPUT_ROOT}/baseline_photometry"
+            --split test
+            --device cuda:0
+            --color-mode auto
+            --sh-degree auto
+            --strict-3dgs-fidelity true
+            --max-frames "${MAX_FRAMES}"
+            --compute-lpips false
+          )
+          if [ -n "${REFERENCE_RENDERS_DIR}" ]; then
+            ARGS+=(--reference-renders-dir "${REFERENCE_RENDERS_DIR}")
+          fi
+          python -m gpis_splatting.cli.validate_3dgs_baseline_photometry "${ARGS[@]}"
+
+      - name: Publish GPU smoke summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "# Self-hosted GPU smoke"
+            echo
+            echo "- Prepared scene: \`${PREPARED_SCENE:-none}\`"
+            echo "- Trained PLY: \`${TRAINED_PLY_PATH:-none}\`"
+            echo "- Optional render executed: \`${RUN_GSPLAT_RENDER:-false}\`"
+            if [ -f "${OUTPUT_ROOT}/gsplat_3dgs/gsplat_render_report.json" ]; then
+              echo "- Render report: \`${OUTPUT_ROOT}/gsplat_3dgs/gsplat_render_report.json\`"
+            fi
+            if [ -f "${OUTPUT_ROOT}/baseline_photometry/baseline_3dgs_photometry_report.md" ]; then
+              echo
+              cat "${OUTPUT_ROOT}/baseline_photometry/baseline_3dgs_photometry_report.md"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload GPU smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: self-hosted-gpu-smoke
+          path: |
+            _gpu_smoke/**/*.csv
+            _gpu_smoke/**/*.json
+            _gpu_smoke/**/*.md
+            _gpu_smoke/**/*.png
+          if-no-files-found: warn
