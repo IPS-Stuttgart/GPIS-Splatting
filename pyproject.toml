@@ -38,6 +38,7 @@ evaluate_render_consistency = "gpis_splatting.cli.evaluate_render_consistency:ma
 download_real_scene = "gpis_splatting.cli.download_real_scene:main"
 bootstrap_real_gpis = "gpis_splatting.cli.bootstrap_real_gpis:main"
 initialize_gpis_splats = "gpis_splatting.cli.initialize_gpis_splats:main"
+finalize_geometry_aware_splats = "gpis_splatting.cli.finalize_geometry_aware_splats:main"
 fit_real_gpis = "gpis_splatting.cli.fit_real_gpis:main"
 augment_depth_normal_supervision = "gpis_splatting.cli.augment_depth_normal_supervision:main"
 initialize_gpis_zero_level_splats = "gpis_splatting.cli.initialize_gpis_zero_level_splats:main"
