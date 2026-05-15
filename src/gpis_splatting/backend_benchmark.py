@@ -16,8 +16,16 @@ from gpis_splatting.gpis_backends import GPISBackend, GPISBackendName, InducingS
 Tensor = torch.Tensor
 BenchmarkShape = Literal["sphere", "torus", "wavy_plane"]
 
-DEFAULT_BACKENDS: tuple[GPISBackendName, ...] = ("dense_exact", "local_exact", "inducing_points")
-KNOWN_BACKENDS: tuple[GPISBackendName, ...] = ("dense_exact", "local_exact", "inducing_points")
+DEFAULT_BACKENDS: tuple[GPISBackendName, ...] = (
+    "dense_exact",
+    "local_exact",
+    "local_kdtree",
+    "inducing_points",
+    "ard_inducing_points",
+    "ski_grid",
+    "multires_inducing",
+)
+KNOWN_BACKENDS: tuple[GPISBackendName, ...] = DEFAULT_BACKENDS + ("local_faiss",)
 KNOWN_SHAPES: tuple[BenchmarkShape, ...] = ("sphere", "torus", "wavy_plane")
 
 CSV_FIELDS: tuple[str, ...] = (
@@ -37,6 +45,14 @@ CSV_FIELDS: tuple[str, ...] = (
     "num_inducing",
     "inducing_selection",
     "fit_batch_size",
+    "leaf_size",
+    "ard_lengthscales",
+    "ski_grid_size",
+    "ski_padding",
+    "ski_max_grid_points",
+    "multires_levels",
+    "multires_lengthscale_decay",
+    "multires_inducing_growth",
     "effective_training_count",
     "effective_num_inducing",
     "effective_num_neighbors",
@@ -58,8 +74,6 @@ CSV_FIELDS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class BackendBenchmarkConfig:
-    """Configuration for a deterministic GPIS backend scalability benchmark."""
-
     output_dir: Path
     benchmark_name: str = "gpis_backend_benchmark"
     backends: tuple[GPISBackendName, ...] = DEFAULT_BACKENDS
@@ -76,57 +90,45 @@ class BackendBenchmarkConfig:
     num_inducing: int = 128
     inducing_selection: InducingSelectionName = "farthest"
     fit_batch_size: int = 8192
+    leaf_size: int = 32
+    ard_lengthscales: tuple[float, ...] | None = None
+    ski_grid_size: int = 8
+    ski_padding: float = 0.05
+    ski_max_grid_points: int = 2048
+    multires_levels: int = 3
+    multires_lengthscale_decay: float = 0.55
+    multires_inducing_growth: float = 1.5
     max_dense_reference_points: int = 2048
     skip_dense_over_points: int = 4096
 
 
 def run_backend_benchmark(config: BackendBenchmarkConfig) -> dict[str, Any]:
-    """Run the backend benchmark and write CSV, JSON, and Markdown artifacts."""
-
     validate_backend_benchmark_config(config)
     config.output_dir.mkdir(parents=True, exist_ok=True)
-
     x_train, y_train = make_benchmark_samples(config.n_train, shape=config.shape, seed=config.seed)
     x_query, _ = make_benchmark_samples(config.n_query, shape=config.shape, seed=config.seed + 1)
     reference_prediction = fit_dense_reference(config, x_train, y_train, x_query)
-
     rows = [run_one_backend(config, backend_name, x_train, y_train, x_query, reference_prediction) for backend_name in config.backends]
     csv_path = config.output_dir / f"{config.benchmark_name}.csv"
     config_path = config.output_dir / f"{config.benchmark_name}_config.json"
     status_path = config.output_dir / f"{config.benchmark_name}_status.json"
     report_path = config.output_dir / f"{config.benchmark_name}_report.md"
-
     write_rows_csv(csv_path, rows)
     write_json(config_path, config_to_jsonable(config))
     status = build_status(config, rows, csv_path=csv_path, config_path=config_path, report_path=report_path)
     write_json(status_path, status)
     write_report(report_path, config, rows, status)
-
-    return {
-        "rows": rows,
-        "csv_path": csv_path,
-        "config_path": config_path,
-        "status_path": status_path,
-        "report_path": report_path,
-        "status": status,
-    }
+    return {"rows": rows, "csv_path": csv_path, "config_path": config_path, "status_path": status_path, "report_path": report_path, "status": status}
 
 
-def run_one_backend(
-    config: BackendBenchmarkConfig,
-    backend_name: GPISBackendName,
-    x_train: Tensor,
-    y_train: Tensor,
-    x_query: Tensor,
-    reference_prediction: GPISPrediction | None,
-) -> dict[str, object]:
+def run_one_backend(config: BackendBenchmarkConfig, backend_name: GPISBackendName, x_train: Tensor, y_train: Tensor, x_query: Tensor, reference_prediction: GPISPrediction | None) -> dict[str, object]:
     row = base_row(config, backend_name)
     if backend_name == "dense_exact" and config.n_train > config.skip_dense_over_points:
         row.update({"status": "skipped", "skip_reason": f"dense_exact skipped because n_train={config.n_train} exceeds skip_dense_over_points={config.skip_dense_over_points}"})
         return row
-
     try:
         fit_start = time.perf_counter()
+        ard = torch.tensor(config.ard_lengthscales, dtype=torch.float64) if config.ard_lengthscales is not None else None
         backend = fit_gpis_backend(
             backend_name,
             x_train,
@@ -138,20 +140,25 @@ def run_one_backend(
             num_inducing=config.num_inducing,
             inducing_selection=config.inducing_selection,
             fit_batch_size=config.fit_batch_size,
+            leaf_size=config.leaf_size,
+            ard_lengthscales=ard,
+            ski_grid_size=config.ski_grid_size,
+            ski_padding=config.ski_padding,
+            ski_max_grid_points=config.ski_max_grid_points,
+            multires_levels=config.multires_levels,
+            multires_lengthscale_decay=config.multires_lengthscale_decay,
+            multires_inducing_growth=config.multires_inducing_growth,
         )
         fit_time = time.perf_counter() - fit_start
-
         predict_start = time.perf_counter()
         prediction = backend.predict(x_query, batch_size=config.batch_size)
         predict_time = time.perf_counter() - predict_start
-        total_time = fit_time + predict_time
-
         row.update(
             {
                 "status": "success",
                 "fit_time_sec": fit_time,
                 "predict_time_sec": predict_time,
-                "total_time_sec": total_time,
+                "total_time_sec": fit_time + predict_time,
                 "queries_per_sec": config.n_query / predict_time if predict_time > 0.0 else math.inf,
                 "model_storage_bytes": tensor_storage_bytes(backend),
                 "model_storage_mib": tensor_storage_bytes(backend) / float(1024**2),
@@ -162,47 +169,32 @@ def run_one_backend(
         )
         if reference_prediction is not None:
             row.update(prediction_error_metrics(prediction, reference_prediction, epsilon=config.epsilon))
-    except Exception as exc:  # pragma: no cover - exercised when external BLAS/torch errors occur.
+    except Exception as exc:  # pragma: no cover - keeps benchmark robust to optional dependency failures.
         row.update({"status": "failed", "skip_reason": f"{type(exc).__name__}: {exc}"})
     return row
 
 
 def make_benchmark_samples(n: int, *, shape: BenchmarkShape = "sphere", seed: int = 17) -> tuple[Tensor, Tensor]:
-    """Create deterministic 3D points and analytic pseudo-SDF values."""
-
     if n < 1:
         raise ValueError("n must be positive.")
     if shape not in KNOWN_SHAPES:
-        raise ValueError(f"Unknown benchmark shape {shape!r}. Expected one of: {', '.join(KNOWN_SHAPES)}.")
+        raise ValueError(f"Unknown benchmark shape {shape!r}.")
     generator = torch.Generator().manual_seed(int(seed))
     points = torch.rand((int(n), 3), generator=generator, dtype=torch.float64) * 2.0 - 1.0
     if shape == "sphere":
         sdf = torch.linalg.norm(points, dim=-1) - 0.65
     elif shape == "torus":
-        major_radius = 0.62
-        minor_radius = 0.22
-        radial = torch.linalg.norm(points[:, :2], dim=-1) - major_radius
-        sdf = torch.linalg.norm(torch.stack((radial, points[:, 2]), dim=-1), dim=-1) - minor_radius
-    elif shape == "wavy_plane":
+        radial = torch.linalg.norm(points[:, :2], dim=-1) - 0.62
+        sdf = torch.linalg.norm(torch.stack((radial, points[:, 2]), dim=-1), dim=-1) - 0.22
+    else:
         sdf = points[:, 2] - 0.18 * torch.sin(4.0 * points[:, 0]) * torch.cos(4.0 * points[:, 1])
-    else:  # pragma: no cover - kept for type-checker exhaustiveness.
-        raise ValueError(f"Unknown benchmark shape {shape!r}.")
     return points, sdf
 
 
 def fit_dense_reference(config: BackendBenchmarkConfig, x_train: Tensor, y_train: Tensor, x_query: Tensor) -> GPISPrediction | None:
     if config.n_train > config.max_dense_reference_points:
         return None
-    backend = fit_gpis_backend(
-        "dense_exact",
-        x_train,
-        y_train,
-        lengthscale=config.lengthscale,
-        variance=config.variance,
-        noise_std=config.noise_std,
-        fit_batch_size=config.fit_batch_size,
-    )
-    return backend.predict(x_query, batch_size=config.batch_size)
+    return fit_gpis_backend("dense_exact", x_train, y_train, lengthscale=config.lengthscale, variance=config.variance, noise_std=config.noise_std).predict(x_query, batch_size=config.batch_size)
 
 
 def prediction_error_metrics(prediction: GPISPrediction, reference: GPISPrediction, *, epsilon: float) -> dict[str, float]:
@@ -246,6 +238,14 @@ def base_row(config: BackendBenchmarkConfig, backend_name: GPISBackendName) -> d
         "num_inducing": config.num_inducing,
         "inducing_selection": config.inducing_selection,
         "fit_batch_size": config.fit_batch_size,
+        "leaf_size": config.leaf_size,
+        "ard_lengthscales": "" if config.ard_lengthscales is None else ";".join(str(v) for v in config.ard_lengthscales),
+        "ski_grid_size": config.ski_grid_size,
+        "ski_padding": config.ski_padding,
+        "ski_max_grid_points": config.ski_max_grid_points,
+        "multires_levels": config.multires_levels,
+        "multires_lengthscale_decay": config.multires_lengthscale_decay,
+        "multires_inducing_growth": config.multires_inducing_growth,
     }
 
 
@@ -270,9 +270,7 @@ def training_count(backend: GPISBackend) -> int | str:
         return int(x_train.shape[0])
     model = getattr(backend, "model", None)
     model_x_train = getattr(model, "x_train", None)
-    if isinstance(model_x_train, torch.Tensor):
-        return int(model_x_train.shape[0])
-    return ""
+    return int(model_x_train.shape[0]) if isinstance(model_x_train, torch.Tensor) else ""
 
 
 def validate_backend_benchmark_config(config: BackendBenchmarkConfig) -> None:
@@ -280,19 +278,15 @@ def validate_backend_benchmark_config(config: BackendBenchmarkConfig) -> None:
         raise ValueError("n_train and n_query must be positive.")
     if not config.backends:
         raise ValueError("At least one backend must be requested.")
-    unknown_backends = sorted(set(config.backends) - set(KNOWN_BACKENDS))
-    if unknown_backends:
-        raise ValueError(f"Unknown backend(s): {', '.join(unknown_backends)}.")
-    if config.shape not in KNOWN_SHAPES:
-        raise ValueError(f"Unknown benchmark shape {config.shape!r}.")
+    unknown = sorted(set(config.backends) - set(KNOWN_BACKENDS))
+    if unknown:
+        raise ValueError(f"Unknown backend(s): {', '.join(unknown)}.")
     if config.lengthscale <= 0.0 or config.variance <= 0.0 or config.noise_std <= 0.0 or config.epsilon <= 0.0:
         raise ValueError("lengthscale, variance, noise_std, and epsilon must be positive.")
-    if config.batch_size < 1 or config.fit_batch_size < 1:
-        raise ValueError("batch_size and fit_batch_size must be positive.")
-    if config.num_neighbors < 1 or config.num_inducing < 1:
-        raise ValueError("num_neighbors and num_inducing must be positive.")
-    if config.max_dense_reference_points < 0 or config.skip_dense_over_points < 0:
-        raise ValueError("Dense reference and skip thresholds must be non-negative.")
+    if config.batch_size < 1 or config.fit_batch_size < 1 or config.num_neighbors < 1 or config.num_inducing < 1:
+        raise ValueError("Batch sizes, neighbors, and inducing count must be positive.")
+    if config.ski_grid_size < 2 or config.multires_levels < 1 or config.multires_lengthscale_decay <= 0.0 or config.multires_inducing_growth <= 0.0:
+        raise ValueError("Invalid advanced-backend parameters.")
 
 
 def write_rows_csv(path: Path, rows: list[dict[str, object]]) -> None:
@@ -304,9 +298,7 @@ def write_rows_csv(path: Path, rows: list[dict[str, object]]) -> None:
 
 def format_csv_value(value: object) -> object:
     if isinstance(value, float):
-        if math.isinf(value):
-            return "inf"
-        return f"{value:.8g}"
+        return "inf" if math.isinf(value) else f"{value:.8g}"
     return value
 
 
@@ -330,48 +322,14 @@ def write_report(path: Path, config: BackendBenchmarkConfig, rows: list[dict[str
     lines = [
         f"# {config.benchmark_name}",
         "",
-        "This benchmark compares GPIS backends on the same deterministic pseudo-SDF samples.",
-        "Dense exact predictions are used as the reference when the requested training size is below the configured dense-reference limit.",
-        "",
-        "## Configuration",
-        "",
-        f"- shape: `{config.shape}`",
-        f"- training observations: `{config.n_train}`",
-        f"- query points: `{config.n_query}`",
-        f"- backends: `{', '.join(config.backends)}`",
-        f"- dense reference limit: `{config.max_dense_reference_points}`",
-        "",
-        "## Results",
+        "This benchmark compares exact, local, inducing, ARD, SKI-grid, and multiresolution GPIS backends on deterministic pseudo-SDF samples.",
         "",
         "| Backend | Status | Fit s | Predict s | Queries/s | Storage MiB | Mean RMSE vs dense | Gate RMSE vs dense |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
-        lines.append(
-            "| {backend} | {status} | {fit} | {predict} | {qps} | {storage} | {mean_rmse} | {gate_rmse} |".format(
-                backend=row["backend"],
-                status=row["status"],
-                fit=format_report_number(row.get("fit_time_sec")),
-                predict=format_report_number(row.get("predict_time_sec")),
-                qps=format_report_number(row.get("queries_per_sec")),
-                storage=format_report_number(row.get("model_storage_mib")),
-                mean_rmse=format_report_number(row.get("mean_rmse_vs_dense")),
-                gate_rmse=format_report_number(row.get("gate_rmse_vs_dense")),
-            )
-        )
-    lines.extend(
-        [
-            "",
-            "## Status",
-            "",
-            f"- ok: `{status['ok']}`",
-            f"- fastest prediction backend: `{status['fastest_predict_backend'] or 'none'}`",
-            f"- successful backends: `{', '.join(status['successful_backends']) or 'none'}`",
-            f"- skipped backends: `{', '.join(status['skipped_backends']) or 'none'}`",
-            f"- failed backends: `{', '.join(status['failed_backends']) or 'none'}`",
-            "",
-        ]
-    )
+        lines.append("| {backend} | {status} | {fit} | {predict} | {qps} | {storage} | {mean_rmse} | {gate_rmse} |".format(backend=row["backend"], status=row["status"], fit=format_report_number(row.get("fit_time_sec")), predict=format_report_number(row.get("predict_time_sec")), qps=format_report_number(row.get("queries_per_sec")), storage=format_report_number(row.get("model_storage_mib")), mean_rmse=format_report_number(row.get("mean_rmse_vs_dense")), gate_rmse=format_report_number(row.get("gate_rmse_vs_dense"))))
+    lines.extend(["", "## Status", "", f"- ok: `{status['ok']}`", f"- fastest prediction backend: `{status['fastest_predict_backend'] or 'none'}`", f"- successful backends: `{', '.join(status['successful_backends']) or 'none'}`", f"- skipped backends: `{', '.join(status['skipped_backends']) or 'none'}`", f"- failed backends: `{', '.join(status['failed_backends']) or 'none'}`", ""])
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -379,9 +337,7 @@ def format_report_number(value: object) -> str:
     if value in (None, ""):
         return ""
     if isinstance(value, float):
-        if math.isinf(value):
-            return "inf"
-        return f"{value:.4g}"
+        return "inf" if math.isinf(value) else f"{value:.4g}"
     return str(value)
 
 
