@@ -407,7 +407,19 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade --index-url "${PYTORCH_INDEX_URL}" torch torchvision torchaudio
-          python -m pip install plyfile tqdm opencv-python-headless
+          python -m pip install plyfile tqdm opencv-python-headless ninja
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          header = (
+              Path(os.environ["OUTPUT_ROOT"])
+              / "gaussian-splatting/submodules/diff-gaussian-rasterization/cuda_rasterizer/rasterizer_impl.h"
+          )
+          text = header.read_text(encoding="utf-8")
+          if "#include <cstdint>" not in text:
+              header.write_text("#include <cstdint>\n" + text, encoding="utf-8")
+          PY
           python -m pip install --no-build-isolation "${OUTPUT_ROOT}/gaussian-splatting/submodules/diff-gaussian-rasterization"
           python -m pip install --no-build-isolation "${OUTPUT_ROOT}/gaussian-splatting/submodules/simple-knn"
 
