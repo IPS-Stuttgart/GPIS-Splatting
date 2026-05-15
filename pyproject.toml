@@ -19,6 +19,9 @@ dependencies = [
 gsplat = [
   "gsplat",
 ]
+faiss = [
+  "faiss-cpu",
+]
 
 [project.scripts]
 generate_scene = "gpis_splatting.cli.generate_scene:main"
