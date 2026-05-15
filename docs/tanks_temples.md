@@ -18,7 +18,9 @@ prepare_tanks_temples_scene `
   --train-view-count 12
 ```
 
-The downloader records official Tanks and Temples provenance and license URLs. The preparer reads the Redwood `.log` camera trajectory, uses the dataset's recommended pinhole initialization (`fx=fy=0.7*W`, `cx=W/2`, `cy=H/2`), stores paths to the COLMAP reconstruction, alignment, crop, and ground-truth geometry when present, and writes the normalized `real_scene.json`, `cameras.json`, and `splits.json`.
+The downloader records official Tanks and Temples provenance and license URLs. The preparer reads the Redwood `.log` camera trajectory and uses the dataset's recommended pinhole initialization (`fx=fy=0.7*W`, `cx=W/2`, `cy=H/2`).
+
+It stores paths to the COLMAP reconstruction, alignment, crop, and ground-truth geometry when present, and writes the normalized `real_scene.json`, `cameras.json`, and `splits.json`.
 
 ## Geometry evaluation
 
@@ -130,7 +132,9 @@ run_tanks_temples_hard_negative_calibration `
   --thresholds 0.02 0.05 0.1
 ```
 
-This creates source, jittered, camera-ray, behind-surface, and crop-random candidate splats, scores the mixed set with GPIS field diagnostics, and calibrates splat confidence on nearest-ground-truth labels. The workflow is intended to test whether GPIS-derived confidence rejects floating or off-surface artifacts, rather than mostly ranking already-good source splats. It also exports the threshold-specific calibrated gates needed by downstream geometry and rendering checks.
+This creates source, jittered, camera-ray, behind-surface, and crop-random candidate splats, scores the mixed set with GPIS field diagnostics, and calibrates splat confidence on nearest-ground-truth labels. The workflow is intended to test whether GPIS-derived confidence rejects floating or off-surface artifacts, rather than mostly ranking already-good source splats.
+
+It also exports the threshold-specific calibrated gates needed by downstream geometry and rendering checks.
 
 ## Real GPIS gate model sweep
 
@@ -149,4 +153,6 @@ run_real_gpis_gate_model_sweep `
   --max-train-points 1200
 ```
 
-This regenerates bootstrap samples for each construction mode, fits a GPIS model for every hyperparameter combination, runs the gate-quality diagnostic for every gate setting, and writes a summary CSV/status/report under `real_scenes/<scene>/model_sweeps/<sweep-name>/`. Use `--construction-modes existing --samples-path ... --splats-path ...` for a fast sweep over already-created samples and splats.
+This regenerates bootstrap samples for each construction mode, fits a GPIS model for every hyperparameter combination, runs the gate-quality diagnostic for every gate setting, and writes a summary CSV/status/report under `real_scenes/<scene>/model_sweeps/<sweep-name>/`.
+
+Use `--construction-modes existing --samples-path ... --splats-path ...` for a fast sweep over already-created samples and splats.

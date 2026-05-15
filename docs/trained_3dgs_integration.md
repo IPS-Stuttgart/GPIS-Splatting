@@ -14,7 +14,9 @@ export_prepared_scene_to_colmap_3dgs `
   --max-points 100000
 ```
 
-The exporter writes `images/` plus `sparse/0/cameras.txt`, `sparse/0/images.txt`, and `sparse/0/points3D.txt`. It copies the selected prepared-scene images, writes COLMAP `PINHOLE` cameras from the normalized camera metadata, and initializes sparse points from the scene's Tanks and Temples reconstruction, COLMAP `points3D.txt`, or an explicit `.ply`/internal splats `.npz` passed with `--points-path`.
+The exporter writes `images/` plus `sparse/0/cameras.txt`, `sparse/0/images.txt`, and `sparse/0/points3D.txt`. It copies the selected prepared-scene images and writes COLMAP `PINHOLE` cameras from the normalized camera metadata.
+
+Sparse points are initialized from the scene's Tanks and Temples reconstruction, COLMAP `points3D.txt`, or an explicit `.ply`/internal splats `.npz` passed with `--points-path`.
 
 ## Train the standard 3DGS implementation
 
@@ -57,7 +59,9 @@ Each exported variant is written as `model_dir/point_cloud/iteration_<n>/point_c
 
 ## Photometric evaluation workflow
 
-For a self-hosted, artifact-producing run, use the **Trained 3DGS Photometric Evaluation** workflow. It assumes the prepared real-scene directory, GPIS model, and trained 3DGS `point_cloud.ply` already exist on the self-hosted runner. The workflow preserves untracked runner files during checkout, converts the trained PLY, scores/calibrates all Gaussians, exports renderable variants, and can either:
+For a self-hosted, artifact-producing run, use the **Trained 3DGS Photometric Evaluation** workflow. It assumes the prepared real-scene directory, GPIS model, and trained 3DGS `point_cloud.ply` already exist on the self-hosted runner.
+
+The workflow preserves untracked runner files during checkout, converts the trained PLY, scores/calibrates all Gaussians, exports renderable variants, and can either:
 
 - run a renderer command template once per variant; or
 - evaluate an existing root of rendered variant directories.
