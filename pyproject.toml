@@ -68,6 +68,7 @@ run_trained_3dgs_gpis_experiment = "gpis_splatting.cli.run_trained_3dgs_gpis_exp
 export_gpis_training_prior = "gpis_splatting.cli.export_gpis_training_prior:main"
 export_gpis_training_policy = "gpis_splatting.cli.export_gpis_training_policy:main"
 benchmark_gpis_backends = "gpis_splatting.cli.benchmark_gpis_backends:main"
+score_large_scale_gpis = "gpis_splatting.cli.score_large_scale_gpis:main"
 write_graphdeco_gpis_patch = "gpis_splatting.cli.write_graphdeco_gpis_patch:main"
 write_reproducibility_report = "gpis_splatting.cli.write_reproducibility_report:main"
 
