@@ -9,6 +9,7 @@ import torch
 
 from gpis_splatting.external_3dgs import load_3dgs_ply, opacity_to_alpha, vertex_colors
 from gpis_splatting.gsplat_adapter import (
+    GsplatCamera,
     GsplatGaussianTensors,
     format_gsplat_manifest_report,
     frame_to_gsplat_camera,
@@ -85,37 +86,22 @@ def render_3dgs_ply_with_gsplat(
     for frame_index in indices:
         frame = frames[int(frame_index)]
         camera = frame_to_gsplat_camera(frame, projection_convention=convention, device=dev, dtype=dt)
-        kwargs = {
-            "means": gaussians.means,
-            "quats": gaussians.quats,
-            "scales": gaussians.scales,
-            "opacities": gaussians.opacities,
-            "colors": gaussians.colors,
-            "viewmats": camera.viewmat.unsqueeze(0),
-            "Ks": camera.K.unsqueeze(0),
-            "width": camera.width,
-            "height": camera.height,
-            "packed": packed,
-            "near_plane": near_plane,
-            "far_plane": far_plane,
-            "radius_clip": radius_clip,
-            "eps2d": eps2d,
-            "tile_size": tile_size,
-            "render_mode": render_mode,
-            "rasterize_mode": rasterize_mode,
-            "channel_chunk": channel_chunk,
-            "camera_model": "pinhole",
-            "backgrounds": background,
-        }
-        if color_info["effective_sh_degree"] is not None:
-            kwargs["sh_degree"] = int(color_info["effective_sh_degree"])
-        try:
-            rendered = rasterizer(**kwargs)
-        except TypeError:
-            for key in ("radius_clip", "rasterize_mode", "channel_chunk"):
-                kwargs.pop(key, None)
-            rendered = rasterizer(**kwargs)
-        image = extract_rgb_image(rendered)
+        image = render_gsplat_frame_image(
+            gaussians=gaussians,
+            camera=camera,
+            color_info=color_info,
+            rasterizer=rasterizer,
+            background=background,
+            packed=packed,
+            near_plane=near_plane,
+            far_plane=far_plane,
+            radius_clip=radius_clip,
+            eps2d=eps2d,
+            tile_size=tile_size,
+            render_mode=render_mode,
+            rasterize_mode=rasterize_mode,
+            channel_chunk=channel_chunk,
+        )
         file_name = str(frame.get("file_name") or Path(str(frame["image_path"])).name)
         image_path = out_dir / file_name
         save_image(image_path, image)
@@ -324,6 +310,56 @@ def resolve_background(*, background_mode: str, background_color: tuple[float, f
     if background_mode == "black":
         return (0.0, 0.0, 0.0)
     return tuple(float(v) for v in background_color)
+
+
+def render_gsplat_frame_image(
+    *,
+    gaussians: GsplatGaussianTensors,
+    camera: GsplatCamera,
+    color_info: dict[str, Any],
+    rasterizer: Any,
+    background: torch.Tensor,
+    packed: bool,
+    near_plane: float,
+    far_plane: float,
+    radius_clip: float,
+    eps2d: float,
+    tile_size: int,
+    render_mode: str,
+    rasterize_mode: str,
+    channel_chunk: int,
+) -> torch.Tensor:
+    kwargs = {
+        "means": gaussians.means,
+        "quats": gaussians.quats,
+        "scales": gaussians.scales,
+        "opacities": gaussians.opacities,
+        "colors": gaussians.colors,
+        "viewmats": camera.viewmat.unsqueeze(0),
+        "Ks": camera.K.unsqueeze(0),
+        "width": camera.width,
+        "height": camera.height,
+        "packed": packed,
+        "near_plane": near_plane,
+        "far_plane": far_plane,
+        "radius_clip": radius_clip,
+        "eps2d": eps2d,
+        "tile_size": tile_size,
+        "render_mode": render_mode,
+        "rasterize_mode": rasterize_mode,
+        "channel_chunk": channel_chunk,
+        "camera_model": "pinhole",
+        "backgrounds": background,
+    }
+    if color_info["effective_sh_degree"] is not None:
+        kwargs["sh_degree"] = int(color_info["effective_sh_degree"])
+    try:
+        rendered = rasterizer(**kwargs)
+    except TypeError:
+        for key in ("radius_clip", "rasterize_mode", "channel_chunk"):
+            kwargs.pop(key, None)
+        rendered = rasterizer(**kwargs)
+    return extract_rgb_image(rendered)
 
 
 def extract_rgb_image(output: Any) -> torch.Tensor:
