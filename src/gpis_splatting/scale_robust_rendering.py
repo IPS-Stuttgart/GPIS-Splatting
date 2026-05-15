@@ -11,7 +11,7 @@ from PIL import Image
 
 from gpis_splatting.external_3dgs import format_optional_number, load_3dgs_ply
 from gpis_splatting.gsplat_adapter import frame_to_gsplat_camera, infer_iteration_from_point_cloud_path, resolve_device, resolve_gsplat_rasterization, resolve_torch_dtype, validate_gsplat_manifest
-from gpis_splatting.gsplat_fidelity_adapter import RASTERIZE_MODES, extract_rgb_image, gaussian_ply_to_gsplat_tensors, resolve_background
+from gpis_splatting.gsplat_fidelity_adapter import RASTERIZE_MODES, gaussian_ply_to_gsplat_tensors, render_gsplat_frame_image, resolve_background
 from gpis_splatting.real_benchmark import _load_lpips_model, lpips_arrays, psnr_arrays, ssim_arrays
 from gpis_splatting.real_pipeline import resolve_frame_indices, resolve_projection_convention
 from gpis_splatting.real_scene import load_prepared_scene, resolve_scene_image_path
@@ -215,37 +215,22 @@ def render_scaled_3dgs_ply_with_gsplat(
     for frame_index in indices:
         frame = scale_prepared_frame(frames[int(frame_index)], scale)
         camera = frame_to_gsplat_camera(frame, projection_convention=convention, device=dev, dtype=dt)
-        kwargs = {
-            "means": gaussians.means,
-            "quats": gaussians.quats,
-            "scales": gaussians.scales,
-            "opacities": gaussians.opacities,
-            "colors": gaussians.colors,
-            "viewmats": camera.viewmat.unsqueeze(0),
-            "Ks": camera.K.unsqueeze(0),
-            "width": camera.width,
-            "height": camera.height,
-            "packed": packed,
-            "near_plane": near_plane,
-            "far_plane": far_plane,
-            "radius_clip": radius_clip,
-            "eps2d": eps2d,
-            "tile_size": tile_size,
-            "render_mode": render_mode,
-            "rasterize_mode": rasterize_mode,
-            "channel_chunk": channel_chunk,
-            "camera_model": "pinhole",
-            "backgrounds": background,
-        }
-        if color_info["effective_sh_degree"] is not None:
-            kwargs["sh_degree"] = int(color_info["effective_sh_degree"])
-        try:
-            rendered = rasterizer(**kwargs)
-        except TypeError:
-            for key in ("radius_clip", "rasterize_mode", "channel_chunk"):
-                kwargs.pop(key, None)
-            rendered = rasterizer(**kwargs)
-        image = extract_rgb_image(rendered)
+        image = render_gsplat_frame_image(
+            gaussians=gaussians,
+            camera=camera,
+            color_info=color_info,
+            rasterizer=rasterizer,
+            background=background,
+            packed=packed,
+            near_plane=near_plane,
+            far_plane=far_plane,
+            radius_clip=radius_clip,
+            eps2d=eps2d,
+            tile_size=tile_size,
+            render_mode=render_mode,
+            rasterize_mode=rasterize_mode,
+            channel_chunk=channel_chunk,
+        )
         file_name = str(frame.get("file_name") or Path(str(frame["image_path"])).name)
         image_path = out_dir / file_name
         save_image(image_path, image)

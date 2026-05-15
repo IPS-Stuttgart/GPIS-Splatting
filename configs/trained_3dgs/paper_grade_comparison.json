@@ -1,0 +1,28 @@
+{
+  "comparison_name": "paper_3dgs",
+  "output_dir": "paper_results/trained_3dgs_comparison",
+  "prepared_root": "real_scenes",
+  "split": "test",
+  "method_name": "trained_3dgs",
+  "prediction_subdir": "test/ours_30000/renders",
+  "primary_geometry_threshold": 0.05,
+  "geometry_thresholds": [0.01, 0.02, 0.05, 0.1],
+  "compute_photometry": true,
+  "compute_geometry": true,
+  "compute_lpips": true,
+  "require_lpips": true,
+  "require_performance": true,
+  "fail_on_missing": false,
+  "scenes": [
+    {
+      "scene": "ignatius_tnt64",
+      "scene_dir": "real_scenes/ignatius_tnt64",
+      "manifest_path": "paper_results/ignatius_tnt64/variants/trained_3dgs_3dgs_variant_manifest.csv",
+      "predictions_root": "paper_results/ignatius_tnt64/renders/gsplat_3dgs_variants",
+      "render_manifest_path": "paper_results/ignatius_tnt64/renders/gsplat_3dgs_variants/trained_3dgs_gsplat_render_manifest.csv",
+      "ground_truth_path": "gt/ignatius.ply",
+      "alignment_path": "gt/ignatius_alignment.txt",
+      "crop_path": "gt/ignatius_crop.json"
+    }
+  ]
+}
