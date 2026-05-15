@@ -408,8 +408,8 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade --index-url "${PYTORCH_INDEX_URL}" torch torchvision torchaudio
           python -m pip install plyfile tqdm opencv-python-headless
-          python -m pip install "${OUTPUT_ROOT}/gaussian-splatting/submodules/diff-gaussian-rasterization"
-          python -m pip install "${OUTPUT_ROOT}/gaussian-splatting/submodules/simple-knn"
+          python -m pip install --no-build-isolation "${OUTPUT_ROOT}/gaussian-splatting/submodules/diff-gaussian-rasterization"
+          python -m pip install --no-build-isolation "${OUTPUT_ROOT}/gaussian-splatting/submodules/simple-knn"
 
       - name: Write training command
         shell: bash
