@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import gpis_splatting.tanks_temples_download as _tanks_temples_download
 from gpis_splatting.tanks_temples_common import image_size, load_tanks_temples_crop, natural_sort_key, unique_image_name
 from gpis_splatting.tanks_temples_download import (
     GoogleDriveConfirmParser,
     add_query_parameter,
     archive_cache_filename,
     download_google_drive_url,
-    download_tanks_temples_scene,
+    download_tanks_temples_scene as _download_tanks_temples_scene,
     download_url,
     extract_archive_member,
     extract_tanks_temples_images,
@@ -43,6 +44,24 @@ from gpis_splatting.tanks_temples_resources import (
     training_bundle_resource,
     training_bundle_resources,
 )
+
+
+def download_tanks_temples_scene(*args, **kwargs):
+    """Download a Tanks and Temples scene through the public facade.
+
+    Tests and downstream callers may monkeypatch ``gpis_splatting.tanks_temples.download_url``.
+    The implementation lives in ``tanks_temples_download`` and resolves its downloader
+    from that module's globals, so this wrapper temporarily forwards the facade's
+    current downloader into the implementation module.
+    """
+
+    original_download_url = _tanks_temples_download.download_url
+    _tanks_temples_download.download_url = download_url
+    try:
+        return _download_tanks_temples_scene(*args, **kwargs)
+    finally:
+        _tanks_temples_download.download_url = original_download_url
+
 
 __all__ = [
     "GOOGLE_DRIVE_DOWNLOAD_URL",
