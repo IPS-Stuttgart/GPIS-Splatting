@@ -80,6 +80,10 @@ addopts = "--basetemp=.pytest_tmp"
 [tool.ruff]
 line-length = 180
 
+[tool.ruff.lint.per-file-ignores]
+"src/gpis_splatting/gpis_backends.py" = ["E702"]
+"src/gpis_splatting/trained_3dgs_evaluation.py" = ["F401"]
+
 [tool.isort]
 profile = "black"
 
