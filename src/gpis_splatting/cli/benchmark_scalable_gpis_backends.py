@@ -7,7 +7,6 @@ import math
 import time
 from pathlib import Path
 
-import torch
 
 from gpis_splatting.backend_benchmark import make_benchmark_samples, prediction_error_metrics
 from gpis_splatting.gpis_backends import DenseExactGPISBackend
