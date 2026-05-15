@@ -72,6 +72,7 @@ run_trained_3dgs_gpis_experiment = "gpis_splatting.cli.run_trained_3dgs_gpis_exp
 extract_3dgs_gpis_surfaces = "gpis_splatting.cli.extract_3dgs_gpis_surfaces:main"
 evaluate_3dgs_gpis_surfaces = "gpis_splatting.cli.evaluate_3dgs_gpis_surfaces:main"
 export_gpis_training_prior = "gpis_splatting.cli.export_gpis_training_prior:main"
+run_scale_robust_rendering_experiment = "gpis_splatting.cli.run_scale_robust_rendering_experiment:main"
 export_gpis_training_policy = "gpis_splatting.cli.export_gpis_training_policy:main"
 benchmark_gpis_backends = "gpis_splatting.cli.benchmark_gpis_backends:main"
 write_graphdeco_gpis_patch = "gpis_splatting.cli.write_graphdeco_gpis_patch:main"
