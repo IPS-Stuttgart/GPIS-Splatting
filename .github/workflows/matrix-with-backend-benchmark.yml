@@ -1,0 +1,98 @@
+---
+name: Matrix with Backend Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      scene:
+        description: Prepared real scene name
+        required: true
+        type: string
+        default: ignatius_tnt64
+      matrix_name:
+        description: Matrix output name
+        required: true
+        type: string
+        default: ignatius_af_matrix
+      benchmark_name:
+        description: Backend benchmark output name
+        required: true
+        type: string
+        default: matrix_backend_benchmark
+      n_train:
+        description: Backend benchmark training observations
+        required: true
+        type: string
+        default: "512"
+      n_query:
+        description: Backend benchmark query points
+        required: true
+        type: string
+        default: "256"
+
+permissions:
+  contents: read
+
+jobs:
+  matrix-with-backend-benchmark:
+    name: Matrix with backend benchmark
+    runs-on: ubuntu-latest
+    env:
+      SCENE: ${{ inputs.scene }}
+      MATRIX_NAME: ${{ inputs.matrix_name }}
+      BENCHMARK_NAME: ${{ inputs.benchmark_name }}
+      N_TRAIN: ${{ inputs.n_train }}
+      N_QUERY: ${{ inputs.n_query }}
+      MATRIX_ROOT: matrix_runs
+      BENCHMARK_ROOT: backend_benchmark_runs
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -e .
+
+      - name: Run backend benchmark
+        run: |
+          python -m gpis_splatting.cli.benchmark_gpis_backends \
+            --output-dir "${BENCHMARK_ROOT}" \
+            --benchmark-name "${BENCHMARK_NAME}" \
+            --n-train "${N_TRAIN}" \
+            --n-query "${N_QUERY}"
+
+      - name: Run A-F matrix skeleton
+        run: |
+          python -m gpis_splatting.cli.run_experiment_matrix \
+            --scene "${SCENE}" \
+            --matrix-name "${MATRIX_NAME}" \
+            --output-dir "${MATRIX_ROOT}/${MATRIX_NAME}"
+
+      - name: Append backend benchmark to matrix report
+        run: |
+          python -m gpis_splatting.cli.append_backend_benchmark_to_matrix_report \
+            --matrix-report "${MATRIX_ROOT}/${MATRIX_NAME}/${MATRIX_NAME}_report.md" \
+            --backend-benchmark "${BENCHMARK_ROOT}/${BENCHMARK_NAME}.csv"
+
+      - name: Publish combined report to job summary
+        run: cat "${MATRIX_ROOT}/${MATRIX_NAME}/${MATRIX_NAME}_report.md" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload combined artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: matrix-with-backend-benchmark-${{ env.MATRIX_NAME }}
+          path: |
+            ${{ env.MATRIX_ROOT }}/${{ env.MATRIX_NAME }}/**
+            ${{ env.BENCHMARK_ROOT }}/${{ env.BENCHMARK_NAME }}.csv
+            ${{ env.BENCHMARK_ROOT }}/${{ env.BENCHMARK_NAME }}_config.json
+            ${{ env.BENCHMARK_ROOT }}/${{ env.BENCHMARK_NAME }}_report.md
+            ${{ env.BENCHMARK_ROOT }}/${{ env.BENCHMARK_NAME }}_status.json
