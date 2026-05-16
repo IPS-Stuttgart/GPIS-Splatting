@@ -44,6 +44,13 @@ def evaluate_real_renders(
             if require_all:
                 continue
             continue
+        if paths_refer_to_same_file(target_path, pred_path):
+            raise ValueError(
+                "Refusing to evaluate a prediction image that resolves to the same file as the target image "
+                f"for frame {frame['image_path']!r}. "
+                f"target={target_path}, prediction={pred_path}, predictions_dir={pred_root}. "
+                "Use a directory containing rendered predictions, not the prepared scene directory or image directory."
+            )
         target = load_image(target_path)
         prediction = load_image(pred_path)
         if prediction.shape != target.shape:
@@ -123,6 +130,13 @@ def unique_paths(paths: list[Path]) -> list[Path]:
             seen.add(key)
             unique.append(path)
     return unique
+
+
+def paths_refer_to_same_file(left: Path, right: Path) -> bool:
+    try:
+        return left.samefile(right)
+    except OSError:
+        return left.resolve(strict=False) == right.resolve(strict=False)
 
 
 def build_real_summary(
