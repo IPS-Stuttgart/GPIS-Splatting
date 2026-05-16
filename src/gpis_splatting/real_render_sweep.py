@@ -116,6 +116,7 @@ def run_real_render_parameter_sweep(
             method_name=variant.method_name,
             split=split,
             require_all=False,
+            allow_diagnostic_proxy=True,
         )
         audit_status = audit_real_renders(
             scene_dir=scene_root,
