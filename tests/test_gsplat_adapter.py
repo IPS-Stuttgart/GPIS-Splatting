@@ -9,6 +9,7 @@ import torch
 from gpis_splatting.external_3dgs import load_3dgs_ply, opacity_to_alpha
 from gpis_splatting.gsplat_adapter import frame_to_gsplat_camera
 from gpis_splatting.gsplat_fidelity_adapter import gaussian_ply_to_gsplat_tensors, render_3dgs_manifest_with_gsplat
+from gpis_splatting.real_3dgs_renderer import render_real_3dgs_splats
 
 
 def test_gaussian_ply_to_gsplat_tensors_decodes_common_3dgs_fields(tmp_path: Path) -> None:
@@ -116,6 +117,46 @@ def test_render_3dgs_manifest_passes_sh_degree_to_rasterizer(tmp_path: Path) -> 
     assert calls
     assert calls[0]["sh_degree"] == 1
     assert calls[0]["colors"].shape == (1, 4, 3)
+
+
+def test_render_real_3dgs_splats_scales_opacity_and_preserves_fields(tmp_path: Path) -> None:
+    scene_dir = tmp_path / "scene"
+    write_tiny_prepared_scene(scene_dir)
+    point_cloud_path = tmp_path / "model" / "point_cloud" / "iteration_7" / "point_cloud.ply"
+    point_cloud_path.parent.mkdir(parents=True)
+    write_tiny_3dgs_ply(point_cloud_path)
+    gate_path = tmp_path / "gate.npz"
+    np.savez_compressed(gate_path, gate=np.asarray([1.0, 0.5], dtype=np.float64))
+    calls: list[dict[str, object]] = []
+
+    def recorder(**kwargs: object) -> torch.Tensor:
+        calls.append(kwargs)
+        return fake_rasterization(**kwargs)
+
+    result = render_real_3dgs_splats(
+        scene_dir=scene_dir,
+        input_ply_path=point_cloud_path,
+        gate_path=gate_path,
+        use_gpis_gate=False,
+        method_name="faithful_gated",
+        split="test",
+        gsplat_device="cpu",
+        gsplat_dtype="float32",
+        gsplat_rasterization_fn=recorder,
+    )
+
+    expected_image = Path(result["output_dir"]) / "frame_000001.png"
+    assert expected_image.exists()
+    assert Path(result["report"]["gated_ply_path"]).exists()
+    assert result["report"]["renderer_backend"] == "gsplat"
+    assert result["report"]["gate_summary"]["source"] == "external"
+    assert calls
+    call = calls[0]
+    assert call["scales"].shape == (2, 3)
+    assert call["quats"].shape == (2, 4)
+    assert call["colors"].shape == (2, 3)
+    expected_opacity = torch.as_tensor(opacity_to_alpha(np.asarray([-1.0, 1.0]), opacity_mode="logit") * np.asarray([1.0, 0.5]), dtype=torch.float32)
+    assert torch.allclose(call["opacities"].detach().cpu(), expected_opacity, atol=1e-6)
 
 
 def fake_rasterization(**kwargs: object) -> torch.Tensor:
