@@ -140,6 +140,7 @@ def run_tanks_temples_calibrated_splat_filtering(
                     benchmark_target=benchmark_target,
                     compute_lpips=False,
                     require_all=False,
+                    allow_diagnostic_proxy=True,
                 )
                 render_summary = render_status["summary"]
 
