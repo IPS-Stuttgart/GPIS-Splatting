@@ -258,6 +258,30 @@ def nearest_neighbor_distances(query: np.ndarray, reference: np.ndarray, *, quer
         raise ValueError("reference points must have shape (N, 3).")
     if query.shape[0] == 0 or reference.shape[0] == 0:
         raise ValueError("nearest-neighbor distances require non-empty point sets.")
+    if query_chunk_size < 1:
+        raise ValueError("query_chunk_size must be positive.")
+    tree_distances = _nearest_neighbor_distances_ckdtree(query, reference, query_chunk_size=query_chunk_size)
+    if tree_distances is not None:
+        return tree_distances
+    return _nearest_neighbor_distances_dense(query, reference, query_chunk_size=query_chunk_size)
+
+
+def _nearest_neighbor_distances_ckdtree(query: np.ndarray, reference: np.ndarray, *, query_chunk_size: int) -> np.ndarray | None:
+    try:
+        from scipy.spatial import cKDTree  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+
+    tree = cKDTree(reference)
+    distances = np.empty((query.shape[0],), dtype=np.float64)
+    for start in range(0, query.shape[0], query_chunk_size):
+        chunk = query[start : start + query_chunk_size]
+        chunk_distances, _ = tree.query(chunk, k=1)
+        distances[start : start + chunk.shape[0]] = chunk_distances
+    return distances
+
+
+def _nearest_neighbor_distances_dense(query: np.ndarray, reference: np.ndarray, *, query_chunk_size: int) -> np.ndarray:
     ref_t = reference.T
     ref_norm = np.sum(reference**2, axis=1)
     distances = np.empty((query.shape[0],), dtype=np.float64)
