@@ -31,6 +31,26 @@ render_3dgs_with_gsplat \
 
 The command writes RGB images plus `gsplat_render_report.json` in the output directory. The report records whether the effective color path was `sh` or `rgb` and which SH degree was used.
 
+## Render through `render_real_splats` without the proxy renderer
+
+The legacy `render_real_splats` command still defaults to the CPU proxy backend for sparse diagnostic splats. That proxy collapses splats to isotropic screen-space kernels and should not be used for photometric claims about trained 3DGS models. For trained-3DGS render metrics, select the `gsplat` backend and pass the original trained PLY:
+
+```bash
+render_real_splats \
+  --scene-dir real_scenes/garden \
+  --renderer-backend gsplat \
+  --input-ply outputs/trained_model/point_cloud/iteration_30000/point_cloud.ply \
+  --gate-path real_scenes/garden/calibrated_primary_confidence_gate.npz \
+  --method-name gpis_confidence_3dgs_gsplat \
+  --split test \
+  --gsplat-color-mode auto \
+  --gsplat-sh-degree auto \
+  --gsplat-strict-3dgs-fidelity true \
+  --gsplat-device cuda:0
+```
+
+This path writes `real_render_report.json` plus the backend `gsplat_render_report.json`. If a GPIS or external gate is active, the command writes a `gated_point_cloud.ply` with opacity scaled in alpha space before calling `gsplat`, so scale, rotation, and SH fields remain intact.
+
 ## Color modes
 
 - `--color-mode auto` uses SH rendering when `f_dc_*` and `f_rest_*` coefficients are present; otherwise it falls back to RGB/DC colors.
