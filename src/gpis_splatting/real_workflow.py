@@ -128,6 +128,7 @@ def run_real_evaluation(
             split=split,
             benchmark_target=benchmark_target,
             require_all=require_all,
+            allow_diagnostic_proxy=True,
         )
         rows.append(
             comparison_row(
@@ -162,6 +163,7 @@ def run_real_evaluation(
                     split=split,
                     benchmark_target=benchmark_target,
                     require_all=require_all,
+                    allow_diagnostic_proxy=True,
                 )
                 rows.append(
                     comparison_row(
@@ -247,6 +249,9 @@ def comparison_row(
         "missing_count": summary["missing_count"],
         "mean_psnr": summary["mean_psnr"],
         "mean_ssim": summary["mean_ssim"],
+        "render_backend": summary.get("render_backend"),
+        "render_fidelity": summary.get("render_fidelity"),
+        "photometric_metrics_policy": summary.get("photometric_metrics_policy"),
         "mean_lpips_vgg": summary["mean_lpips_vgg"],
         "gate_min": gate_summary.get("min"),
         "gate_mean": gate_summary.get("mean"),
@@ -275,7 +280,7 @@ def format_real_evaluation_report(status: dict[str, Any], comparison: pd.DataFra
         if best is not None:
             lines.append(f"- {label}: `{best['method']}` (`{best[metric]:.6g}`)")
     lines.extend(["", "## Methods", ""])
-    method_table = comparison[["method", "use_gpis_gate", "splat_sigma", "epsilon", "gate_floor", "image_count", "missing_count", "mean_psnr", "mean_ssim"]]
+    method_table = comparison[["method", "use_gpis_gate", "splat_sigma", "epsilon", "gate_floor", "render_fidelity", "photometric_metrics_policy", "image_count", "missing_count", "mean_psnr", "mean_ssim"]]
     lines.extend(markdown_table(method_table))
     return "\n".join(lines) + "\n"
 
