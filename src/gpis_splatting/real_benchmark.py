@@ -204,6 +204,8 @@ def psnr_arrays(prediction: np.ndarray, target: np.ndarray) -> float:
 
 
 def ssim_arrays(prediction: np.ndarray, target: np.ndarray) -> float:
+    if np.array_equal(prediction, target):
+        return 1.0
     c1 = 0.01**2
     c2 = 0.03**2
     window_size = 11
