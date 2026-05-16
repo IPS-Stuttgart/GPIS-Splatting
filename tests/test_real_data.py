@@ -29,7 +29,7 @@ from gpis_splatting.cli.run_tanks_temples_hard_negative_calibration import main 
 from gpis_splatting.cli.run_tanks_temples_gate_sweep import main as run_tanks_temples_gate_sweep_main
 from gpis_splatting.cli.validate_real_scene import main as validate_real_scene_main
 from gpis_splatting.real_bootstrap import load_ply_point_cloud
-from gpis_splatting.real_geometry import crop_mask, evaluate_geometry_group
+from gpis_splatting.real_geometry import crop_mask, evaluate_geometry_group, nearest_neighbor_distances
 from gpis_splatting.real_scene import build_sparse_split
 from gpis_splatting.serialization import read_json, write_json
 from gpis_splatting.splats import SplatCloud, load_splats, save_splats
@@ -835,6 +835,32 @@ def test_geometry_metrics_and_crop_mask() -> None:
 
     crop = {"min": [-0.01, -0.01, -0.01], "max": [0.2, 0.2, 0.2]}
     assert crop_mask(pred, crop).tolist() == [True, True, False]
+
+
+def test_nearest_neighbor_distances_are_exact_and_chunk_invariant() -> None:
+    query = np.asarray(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [3.0, 4.0, 0.0],
+            [-1.0, 2.0, 2.0],
+        ],
+        dtype=np.float64,
+    )
+    reference = np.asarray(
+        [
+            [0.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [-1.0, 2.0, 0.0],
+        ],
+        dtype=np.float64,
+    )
+
+    distances_one_chunk = nearest_neighbor_distances(query, reference, query_chunk_size=16)
+    distances_small_chunks = nearest_neighbor_distances(query, reference, query_chunk_size=2)
+
+    assert np.allclose(distances_one_chunk, [0.0, 1.0, np.sqrt(17.0), 2.0])
+    assert np.allclose(distances_small_chunks, distances_one_chunk)
 
 
 def test_evaluate_tanks_temples_geometry_cli(tmp_path: Path) -> None:
