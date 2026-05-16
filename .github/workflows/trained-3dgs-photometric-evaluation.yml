@@ -89,7 +89,7 @@ on: # yamllint disable-line rule:truthy
           - logit
           - linear
       render_command_template:
-        description: Optional shell command template to render each variant. Placeholders include {model_dir}, {output_dir}, {scene_dir}, {variant}, {iteration}, {point_cloud_path}.
+        description: Optional shell command template to render each variant, or "gsplat"/"builtin:gsplat" for the built-in renderer. Placeholders include {model_dir}, {output_dir}, {scene_dir}, {variant}, {iteration}, {point_cloud_path}.
         required: false
         type: string
         default: ""
@@ -564,7 +564,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
-          python -m pip install -e .
+          if [ "${RENDER_COMMAND_TEMPLATE}" = "gsplat" ] || [ "${RENDER_COMMAND_TEMPLATE}" = "builtin:gsplat" ]; then
+            python -m pip install -e ".[gsplat]"
+          else
+            python -m pip install -e .
+          fi
 
       - name: Validate inputs and derive paths
         shell: bash
@@ -650,7 +654,7 @@ jobs:
             --opacity-mode "${OPACITY_MODE}"
 
       - name: Render trained 3DGS variants
-        if: ${{ inputs.render_command_template != '' }}
+        if: ${{ inputs.render_command_template != '' && inputs.render_command_template != 'gsplat' && inputs.render_command_template != 'builtin:gsplat' }}
         shell: bash
         run: |
           python - <<'PY'
@@ -684,15 +688,45 @@ jobs:
               print("::endgroup::")
           PY
 
+      - name: Render trained 3DGS variants with gsplat
+        if: ${{ inputs.render_command_template == 'gsplat' || inputs.render_command_template == 'builtin:gsplat' }}
+        shell: bash
+        run: |
+          ARGS=(
+            --manifest-path "${MANIFEST_PATH}"
+            --scene-dir "${SCENE_DIR}"
+            --output-dir "${RENDER_OUTPUT_ROOT}"
+            --method-name "${METHOD_NAME}_gsplat"
+            --split "${RENDER_SPLIT}"
+            --opacity-mode "${OPACITY_MODE}"
+          )
+          python -m gpis_splatting.cli.render_3dgs_with_gsplat "${ARGS[@]}"
+
       - name: Select render predictions root
         shell: bash
         run: |
           if [ -n "${RENDERED_PREDICTIONS_ROOT}" ]; then
-            echo "PREDICTIONS_ROOT=${RENDERED_PREDICTIONS_ROOT}" >> "${GITHUB_ENV}"
-            echo "EVALUATE_RENDERED_VARIANTS=true" >> "${GITHUB_ENV}"
+            {
+              echo "PREDICTIONS_ROOT=${RENDERED_PREDICTIONS_ROOT}"
+              echo "PREDICTION_SUBDIR=${PREDICTION_SUBDIR}"
+              echo "EVALUATE_RENDERED_VARIANTS=true"
+            } >> "${GITHUB_ENV}"
+          elif [ "${RENDER_COMMAND_TEMPLATE}" = "gsplat" ] || [ "${RENDER_COMMAND_TEMPLATE}" = "builtin:gsplat" ]; then
+            selected_subdir="${PREDICTION_SUBDIR}"
+            if [ -z "${selected_subdir}" ]; then
+              selected_subdir="${RENDER_SPLIT}/ours_${ITERATION}/renders"
+            fi
+            {
+              echo "PREDICTIONS_ROOT=${RENDER_OUTPUT_ROOT}"
+              echo "PREDICTION_SUBDIR=${selected_subdir}"
+              echo "EVALUATE_RENDERED_VARIANTS=true"
+            } >> "${GITHUB_ENV}"
           elif [ -n "${RENDER_COMMAND_TEMPLATE}" ]; then
-            echo "PREDICTIONS_ROOT=${RENDER_OUTPUT_ROOT}" >> "${GITHUB_ENV}"
-            echo "EVALUATE_RENDERED_VARIANTS=true" >> "${GITHUB_ENV}"
+            {
+              echo "PREDICTIONS_ROOT=${RENDER_OUTPUT_ROOT}"
+              echo "PREDICTION_SUBDIR=${PREDICTION_SUBDIR}"
+              echo "EVALUATE_RENDERED_VARIANTS=true"
+            } >> "${GITHUB_ENV}"
           else
             echo "EVALUATE_RENDERED_VARIANTS=false" >> "${GITHUB_ENV}"
           fi
@@ -794,6 +828,7 @@ jobs:
             echo "- Manifest: \`${MANIFEST_PATH}\`"
             echo "- Calibrated gate: \`${CALIBRATED_GATE_PATH}\`"
             echo "- Missing gate value: \`${MISSING_GATE_VALUE}\`"
+            echo "- Render command/backend: \`${RENDER_COMMAND_TEMPLATE:-none}\`"
             echo "- Render evaluation enabled: \`${EVALUATE_RENDERED_VARIANTS:-false}\`"
             echo "- Render-name map: \`${MAPPED_RENDER_NAME_MAP_PATH:-${RENDER_NAME_MAP_PATH:-none}}\`"
             if [ -f "${EVALUATIONS_DIR}/${METHOD_NAME}_3dgs_render_evaluation_report.md" ]; then
@@ -824,6 +859,10 @@ jobs:
             real_scenes/${{ env.PREPARED_SCENE }}/evaluations/${{ env.METHOD_NAME }}_3dgs_render_*.csv
             real_scenes/${{ env.PREPARED_SCENE }}/evaluations/${{ env.METHOD_NAME }}_3dgs_render_*.json
             real_scenes/${{ env.PREPARED_SCENE }}/evaluations/${{ env.METHOD_NAME }}_3dgs_render_*.md
+            real_scenes/${{ env.PREPARED_SCENE }}/renders/${{ env.METHOD_NAME }}_variants/${{ env.METHOD_NAME }}_gsplat_gsplat_render_*.csv
+            real_scenes/${{ env.PREPARED_SCENE }}/renders/${{ env.METHOD_NAME }}_variants/${{ env.METHOD_NAME }}_gsplat_gsplat_render_*.json
+            real_scenes/${{ env.PREPARED_SCENE }}/renders/${{ env.METHOD_NAME }}_variants/${{ env.METHOD_NAME }}_gsplat_gsplat_render_*.md
+            real_scenes/${{ env.PREPARED_SCENE }}/renders/${{ env.METHOD_NAME }}_variants/**/gsplat_render_report.json
             real_scenes/${{ env.PREPARED_SCENE }}/renders/${{ env.METHOD_NAME }}_mapped_variants/**/mapped_render_images*.csv
             real_scenes/${{ env.PREPARED_SCENE }}/renders/${{ env.METHOD_NAME }}_mapped_variants/**/mapped_render_images*.json
             real_scenes/${{ env.PREPARED_SCENE }}/renders/${{ env.METHOD_NAME }}_mapped_variants/**/mapped_render_images*.md
