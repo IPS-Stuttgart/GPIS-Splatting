@@ -1,8 +1,50 @@
 from __future__ import annotations
 
-import numpy as np
+import json
+from pathlib import Path
 
-from gpis_splatting.real_benchmark import ssim_arrays
+import numpy as np
+import pytest
+from PIL import Image
+
+from gpis_splatting.real_benchmark import evaluate_real_renders, ssim_arrays
+
+
+def test_evaluate_real_renders_rejects_prediction_target_same_file(tmp_path: Path) -> None:
+    scene_dir = tmp_path / "scene"
+    image_dir = scene_dir / "images"
+    image_dir.mkdir(parents=True)
+    image_path = image_dir / "000000.png"
+    Image.fromarray(np.full((8, 9, 3), 127, dtype=np.uint8), mode="RGB").save(image_path)
+    (scene_dir / "real_scene.json").write_text(
+        json.dumps({"schema_version": 1, "scene": "alias_scene", "dataset": "unit_test"}),
+        encoding="utf-8",
+    )
+    (scene_dir / "cameras.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "frames": [
+                    {
+                        "index": 0,
+                        "image_path": "images/000000.png",
+                        "file_name": "000000.png",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (scene_dir / "splits.json").write_text(json.dumps({"schema_version": 1, "test": [0], "train": []}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="same file as the target image"):
+        evaluate_real_renders(
+            scene_dir=scene_dir,
+            predictions_dir=scene_dir,
+            output_dir=tmp_path / "out",
+            method_name="bad_alias",
+            split="test",
+        )
 
 
 def test_ssim_arrays_returns_one_for_identical_images() -> None:
