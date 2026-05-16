@@ -651,7 +651,8 @@ jobs:
             --method-name "${METHOD_NAME}" \
             --iteration "${ITERATION}" \
             --gate-thresholds "${GATE_THRESHOLD_ARGS[@]}" \
-            --opacity-mode "${OPACITY_MODE}"
+            --opacity-mode "${OPACITY_MODE}" \
+            --opacity-scale-floors 0.5 0.8
 
       - name: Render trained 3DGS variants
         if: ${{ inputs.render_command_template != '' && inputs.render_command_template != 'gsplat' && inputs.render_command_template != 'builtin:gsplat' }}

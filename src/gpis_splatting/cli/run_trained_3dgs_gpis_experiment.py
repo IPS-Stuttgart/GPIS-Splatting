@@ -25,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--iteration", type=int, default=30000)
     parser.add_argument("--opacity-mode", choices=["logit", "linear"], default="logit")
     parser.add_argument("--opacity-scale-floor", type=float, default=0.0)
+    parser.add_argument("--opacity-scale-floors", type=float, nargs="*", default=[], help="Additional conservative opacity floors to export as gate_floor_<value> variants.")
     parser.add_argument("--renderer", choices=TRAINED_3DGS_RENDERERS, default="none")
     parser.add_argument("--render-command-template", default=None)
     parser.add_argument("--rendered-predictions-root", default=None)
@@ -65,6 +66,7 @@ def main(argv: list[str] | None = None) -> None:
         iteration=args.iteration,
         opacity_mode=args.opacity_mode,
         opacity_scale_floor=args.opacity_scale_floor,
+        opacity_scale_floors=tuple(args.opacity_scale_floors),
         renderer=args.renderer,
         render_command_template=args.render_command_template,
         rendered_predictions_root=args.rendered_predictions_root,

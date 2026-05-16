@@ -20,6 +20,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--opacity-mode", choices=["logit", "linear"], default="logit")
     parser.add_argument("--opacity-scale-floor", type=float, default=0.0)
     parser.add_argument(
+        "--opacity-scale-floors",
+        type=float,
+        nargs="*",
+        default=[],
+        help="Additional conservative opacity floors to export as gate_floor_<value> variants.",
+    )
+    parser.add_argument(
         "--template-model-dir",
         default=None,
         help="Optional source 3DGS model directory whose cfg_args/cameras.json/exposure.json are copied into each variant. Inferred from standard input PLY paths when omitted.",
@@ -41,6 +48,7 @@ def main(argv: list[str] | None = None) -> None:
         write_filtered=args.write_filtered,
         opacity_mode=args.opacity_mode,
         opacity_scale_floor=args.opacity_scale_floor,
+        opacity_scale_floors=tuple(args.opacity_scale_floors),
         template_model_dir=args.template_model_dir,
     )
     print(f"Wrote {result['manifest_path']}")

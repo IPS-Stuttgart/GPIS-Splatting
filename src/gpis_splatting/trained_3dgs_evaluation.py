@@ -47,6 +47,7 @@ def run_trained_3dgs_gpis_experiment(
     iteration: int = 30000,
     opacity_mode: str = "logit",
     opacity_scale_floor: float = 0.0,
+    opacity_scale_floors: tuple[float, ...] = (),
     include_baseline: bool = True,
     write_scaled: bool = True,
     write_filtered: bool = True,
@@ -144,6 +145,7 @@ def run_trained_3dgs_gpis_experiment(
         write_filtered=write_filtered,
         opacity_mode=opacity_mode,
         opacity_scale_floor=opacity_scale_floor,
+        opacity_scale_floors=opacity_scale_floors,
         template_model_dir=template_model_dir,
     )
 

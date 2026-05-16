@@ -193,6 +193,7 @@ def export_3dgs_gpis_variants(
     write_filtered: bool = True,
     opacity_mode: str = "logit",
     opacity_scale_floor: float = 0.0,
+    opacity_scale_floors: tuple[float, ...] = (),
     template_model_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     validate_export_config(
@@ -203,6 +204,7 @@ def export_3dgs_gpis_variants(
         write_filtered=write_filtered,
         opacity_mode=opacity_mode,
         opacity_scale_floor=opacity_scale_floor,
+        opacity_scale_floors=opacity_scale_floors,
     )
     ply = load_3dgs_ply(input_ply_path)
     gates = load_gate_array(gate_path, expected_count=ply.vertex_count)
@@ -227,6 +229,24 @@ def export_3dgs_gpis_variants(
                 opacity_scaled=True,
             )
         )
+        for floor in sorted(set(opacity_scale_floors)):
+            if floor == opacity_scale_floor:
+                continue
+            label = format_threshold_label(floor)
+            rows.append(
+                write_variant(
+                    ply=ply,
+                    out_dir=out_dir,
+                    method_name=method_name,
+                    name=f"gate_floor_{label}",
+                    kind="gate_scaled_floor",
+                    iteration=iteration,
+                    gates=gates,
+                    opacity_mode=opacity_mode,
+                    opacity_scale_floor=floor,
+                    opacity_scaled=True,
+                )
+            )
     if write_filtered:
         for threshold in sorted(set(gate_thresholds)):
             mask = gates >= threshold
@@ -263,6 +283,7 @@ def export_3dgs_gpis_variants(
         "iteration": iteration,
         "opacity_mode": opacity_mode,
         "opacity_scale_floor": opacity_scale_floor,
+        "opacity_scale_floors": list(opacity_scale_floors),
         "input_gaussian_count": ply.vertex_count,
         "gate_min": float(gates.min()) if gates.size else None,
         "gate_max": float(gates.max()) if gates.size else None,
@@ -373,6 +394,7 @@ def evaluate_3dgs_variant_renders(
                 "retention_fraction": float(row.retention_fraction),
                 "gate_threshold": None if pd.isna(row.gate_threshold) else float(row.gate_threshold),
                 "opacity_scaled": parse_bool_like(row.opacity_scaled),
+                "opacity_scale_floor": optional_manifest_float(row, "opacity_scale_floor"),
                 "gate_min": None if pd.isna(row.gate_min) else float(row.gate_min),
                 "gate_max": None if pd.isna(row.gate_max) else float(row.gate_max),
                 "gate_mean": None if pd.isna(row.gate_mean) else float(row.gate_mean),
@@ -453,6 +475,7 @@ def write_variant(
         "retention_fraction": float(vertices.shape[0] / ply.vertex_count),
         "gate_threshold": gate_threshold,
         "opacity_scaled": bool(opacity_scaled),
+        "opacity_scale_floor": float(opacity_scale_floor) if opacity_scaled else None,
         "gate_min": float(selected_gates.min()) if selected_gates.size else None,
         "gate_max": float(selected_gates.max()) if selected_gates.size else None,
         "gate_mean": float(selected_gates.mean()) if selected_gates.size else None,
@@ -532,6 +555,7 @@ def render_missing_variant_row(*, row: Any, variant: str) -> dict[str, Any]:
         "retention_fraction": float(row.retention_fraction),
         "gate_threshold": None if pd.isna(row.gate_threshold) else float(row.gate_threshold),
         "opacity_scaled": parse_bool_like(row.opacity_scaled),
+        "opacity_scale_floor": optional_manifest_float(row, "opacity_scale_floor"),
         "gate_min": None if pd.isna(row.gate_min) else float(row.gate_min),
         "gate_max": None if pd.isna(row.gate_max) else float(row.gate_max),
         "gate_mean": None if pd.isna(row.gate_mean) else float(row.gate_mean),
@@ -554,6 +578,13 @@ def scale_opacity(vertices: np.ndarray, gates: np.ndarray, *, opacity_mode: str,
     scaled_alpha = np.clip(alpha * gate_multiplier(gates, opacity_scale_floor), 1e-6, 1.0 - 1e-6)
     output["opacity"] = alpha_to_opacity(scaled_alpha, opacity_mode=opacity_mode).astype(output["opacity"].dtype)
     return output
+
+
+def optional_manifest_float(row: Any, name: str) -> float | None:
+    value = getattr(row, name, None)
+    if value is None or pd.isna(value):
+        return None
+    return float(value)
 
 
 def vertex_centers(vertices: np.ndarray) -> np.ndarray:
@@ -622,6 +653,7 @@ def validate_export_config(
     write_filtered: bool,
     opacity_mode: str,
     opacity_scale_floor: float,
+    opacity_scale_floors: tuple[float, ...],
 ) -> None:
     if iteration < 0:
         raise ValueError("iteration must be non-negative.")
@@ -633,6 +665,8 @@ def validate_export_config(
         raise ValueError("opacity_mode must be 'logit' or 'linear'.")
     if not 0.0 <= opacity_scale_floor <= 1.0:
         raise ValueError("opacity_scale_floor must be in [0, 1].")
+    if any(not 0.0 <= floor <= 1.0 for floor in opacity_scale_floors):
+        raise ValueError("opacity_scale_floors must be in [0, 1].")
 
 
 def format_3dgs_variant_report(status: dict[str, Any], manifest: pd.DataFrame) -> str:
@@ -678,13 +712,14 @@ def format_3dgs_render_evaluation_report(status: dict[str, Any], comparison: pd.
 
 def format_render_comparison_table(comparison: pd.DataFrame) -> str:
     lines = [
-        "| variant | kind | retained | retention | opacity_scaled | psnr | ssim | lpips_vgg | images | missing |",
-        "| --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
+        "| variant | kind | retained | retention | opacity_scaled | opacity_floor | psnr | ssim | lpips_vgg | images | missing |",
+        "| --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in comparison.itertuples(index=False):
+        opacity_floor = format_optional_number(getattr(row, "opacity_scale_floor", None))
         lines.append(
             f"| `{row.variant}` | `{row.variant_kind}` | {row.retained_count} | {row.retention_fraction:.6g} | "
-            f"`{row.opacity_scaled}` | {format_optional_number(row.mean_psnr)} | {format_optional_number(row.mean_ssim)} | "
+            f"`{row.opacity_scaled}` | {opacity_floor} | {format_optional_number(row.mean_psnr)} | {format_optional_number(row.mean_ssim)} | "
             f"{format_optional_number(row.mean_lpips_vgg)} | {row.image_count} | {format_optional_number(row.missing_count)} |"
         )
     return "\n".join(lines)
@@ -704,13 +739,15 @@ def parse_bool_like(value: Any) -> bool:
 
 def format_manifest_table(manifest: pd.DataFrame) -> str:
     lines = [
-        "| variant | kind | retained | retention | opacity_scaled | gate_threshold | model_dir |",
-        "| --- | --- | ---: | ---: | --- | ---: | --- |",
+        "| variant | kind | retained | retention | opacity_scaled | opacity_floor | gate_threshold | model_dir |",
+        "| --- | --- | ---: | ---: | --- | ---: | ---: | --- |",
     ]
     for row in manifest.itertuples(index=False):
         threshold = "n/a" if pd.isna(row.gate_threshold) else f"{row.gate_threshold:.6g}"
+        floor = getattr(row, "opacity_scale_floor", None)
+        opacity_floor = "n/a" if not getattr(row, "opacity_scaled", False) or floor is None or pd.isna(floor) else f"{floor:.6g}"
         lines.append(
             f"| `{row.variant}` | `{row.variant_kind}` | {row.retained_count} | {row.retention_fraction:.6g} | "
-            f"`{row.opacity_scaled}` | {threshold} | `{row.model_dir}` |"
+            f"`{row.opacity_scaled}` | {opacity_floor} | {threshold} | `{row.model_dir}` |"
         )
     return "\n".join(lines)
