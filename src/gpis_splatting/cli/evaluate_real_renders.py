@@ -27,6 +27,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--benchmark-target", default=None)
     parser.add_argument("--compute-lpips", type=str_to_bool, default=False)
     parser.add_argument("--require-all", type=str_to_bool, default=True)
+    parser.add_argument(
+        "--allow-diagnostic-proxy",
+        type=str_to_bool,
+        default=False,
+        help="Allow PSNR/SSIM/LPIPS evaluation of render_real_splats CPU proxy outputs. Keep false for photometric claims.",
+    )
     return parser
 
 
@@ -45,6 +51,7 @@ def main(argv: list[str] | None = None) -> None:
         benchmark_target=args.benchmark_target,
         compute_lpips=args.compute_lpips,
         require_all=args.require_all,
+        allow_diagnostic_proxy=args.allow_diagnostic_proxy,
     )
     print(f"Wrote {status['metrics_path']}")
     print(f"Wrote {status['summary_path']}")
