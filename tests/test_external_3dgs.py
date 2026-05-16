@@ -49,23 +49,33 @@ def test_export_3dgs_gpis_variants_preserves_and_gates_ply(tmp_path: Path) -> No
             "7",
             "--gate-thresholds",
             "0.5",
+            "--opacity-scale-floors",
+            "0.5",
         ]
     )
 
     baseline = load_3dgs_ply(output_dir / "paper_gate_baseline" / "point_cloud" / "iteration_7" / "point_cloud.ply")
     filtered = load_3dgs_ply(output_dir / "paper_gate_gate_ge_0p5" / "point_cloud" / "iteration_7" / "point_cloud.ply")
     scaled = load_3dgs_ply(output_dir / "paper_gate_gate_scaled" / "point_cloud" / "iteration_7" / "point_cloud.ply")
+    floor_scaled = load_3dgs_ply(output_dir / "paper_gate_gate_floor_0p5" / "point_cloud" / "iteration_7" / "point_cloud.ply")
     manifest = (output_dir / "paper_gate_3dgs_variant_manifest.csv").read_text(encoding="utf-8")
+    manifest_table = pd.read_csv(output_dir / "paper_gate_3dgs_variant_manifest.csv")
 
     assert baseline.vertex_count == 4
     assert filtered.vertex_count == 2
     assert np.allclose(filtered.vertices["x"], [2.0, 3.0])
     assert np.allclose(filtered.vertices["f_dc_0"], [0.3, 0.4])
     assert "gate_scaled" in manifest
+    assert "gate_floor_0p5" in manifest
 
     source_alpha = opacity_to_alpha(baseline.vertices["opacity"].astype(np.float64), opacity_mode="logit")
     scaled_alpha = opacity_to_alpha(scaled.vertices["opacity"].astype(np.float64), opacity_mode="logit")
+    floor_scaled_alpha = opacity_to_alpha(floor_scaled.vertices["opacity"].astype(np.float64), opacity_mode="logit")
     assert np.allclose(scaled_alpha, source_alpha * np.asarray([0.1, 0.3, 0.8, 0.9]), atol=1e-6)
+    assert np.allclose(floor_scaled_alpha, source_alpha * np.asarray([0.55, 0.65, 0.9, 0.95]), atol=1e-6)
+    floor_row = manifest_table[manifest_table["variant"] == "gate_floor_0p5"].iloc[0]
+    assert floor_row["variant_kind"] == "gate_scaled_floor"
+    assert floor_row["opacity_scale_floor"] == 0.5
 
 
 def test_export_3dgs_gpis_variants_rejects_gate_count_mismatch(tmp_path: Path) -> None:
