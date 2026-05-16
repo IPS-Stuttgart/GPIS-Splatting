@@ -66,6 +66,11 @@ def test_render_3dgs_manifest_with_injected_rasterizer(tmp_path: Path) -> None:
     write_tiny_3dgs_ply(point_cloud_path)
     manifest_path = tmp_path / "manifest.csv"
     pd.DataFrame([{"variant": "baseline", "variant_kind": "baseline", "point_cloud_path": str(point_cloud_path)}]).to_csv(manifest_path, index=False)
+    calls: list[dict[str, object]] = []
+
+    def recorder(**kwargs: object) -> torch.Tensor:
+        calls.append(kwargs)
+        return fake_rasterization(**kwargs)
 
     result = render_3dgs_manifest_with_gsplat(
         manifest_path=manifest_path,
@@ -75,13 +80,14 @@ def test_render_3dgs_manifest_with_injected_rasterizer(tmp_path: Path) -> None:
         split="test",
         device="cpu",
         strict_3dgs_fidelity=True,
-        rasterization_fn=fake_rasterization,
+        rasterization_fn=recorder,
     )
 
     expected = tmp_path / "renders" / "baseline" / "test" / "ours_7" / "renders" / "frame_000001.png"
     assert expected.exists()
     assert result["status"]["variant_count"] == 1
     assert (tmp_path / "renders" / "unit_gsplat_gsplat_render_manifest.csv").exists()
+    assert calls[0]["backgrounds"].shape == (3,)
 
 
 def test_render_3dgs_manifest_passes_sh_degree_to_rasterizer(tmp_path: Path) -> None:

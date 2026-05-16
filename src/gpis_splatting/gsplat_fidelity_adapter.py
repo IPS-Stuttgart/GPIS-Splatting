@@ -81,7 +81,9 @@ def render_3dgs_ply_with_gsplat(
     out_dir.mkdir(parents=True, exist_ok=True)
     convention = resolve_projection_convention(scene_meta, projection_convention)
     bg = resolve_background(background_mode=background_mode, background_color=background_color)
-    background = torch.tensor(bg, dtype=dt, device=dev).reshape(1, 3)
+    background = torch.tensor(bg, dtype=dt, device=dev)
+    if not packed:
+        background = background.reshape(1, 3)
     outputs = []
     for frame_index in indices:
         frame = frames[int(frame_index)]
