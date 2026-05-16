@@ -34,12 +34,8 @@ def main(argv: list[str] | None = None) -> None:
         posterior = np.load(posterior_path)
         eval_points = torch.from_numpy(posterior["grid_xyz"]).to(dtype=torch.float64)
         true_sdf = torch.from_numpy(posterior["true_sdf"]).to(dtype=torch.float64)
-        if "distance" in posterior.files and "distance_std" in posterior.files:
-            prediction = GPISPrediction(
-                mean=torch.from_numpy(posterior["mean"]).to(dtype=torch.float64),
-                variance=torch.from_numpy(posterior["variance"]).to(dtype=torch.float64),
-                gradient=torch.from_numpy(_gradient_from_distance_arrays(posterior)).to(dtype=torch.float64),
-            )
+        if "gradient" in posterior.files:
+            prediction = _prediction_from_posterior_arrays(posterior)
         else:
             model, _ = load_model(str(model_path))
             prediction = predict_gpis(model, eval_points, batch_size=args.batch_size)
@@ -69,21 +65,16 @@ def main(argv: list[str] | None = None) -> None:
             print(f"{key}: {value}")
 
 
-def _gradient_from_distance_arrays(posterior: np.lib.npyio.NpzFile) -> np.ndarray:
-    """Reconstruct a compatible gradient magnitude for metrics saved in posterior_grid.npz."""
-    mean = posterior["mean"]
-    distance = posterior["distance"]
-    distance_std = np.clip(posterior["distance_std"], 1e-6, None)
-    std = np.sqrt(np.clip(posterior["variance"], 1e-12, None))
-    grad_norm_from_distance = np.abs(mean) / np.clip(np.abs(distance), 1e-6, None)
-    grad_norm_from_std = std / distance_std
-    grad_norm = np.where(np.isfinite(grad_norm_from_distance), grad_norm_from_distance, grad_norm_from_std)
-    grad_norm = np.clip(grad_norm, 1e-6, None)
-    gradient = np.zeros((mean.shape[0], 3), dtype=np.float64)
-    gradient[:, 0] = grad_norm
-    return gradient
+def _prediction_from_posterior_arrays(posterior: np.lib.npyio.NpzFile) -> GPISPrediction:
+    mean = torch.from_numpy(posterior["mean"]).to(dtype=torch.float64)
+    variance = torch.from_numpy(posterior["variance"]).to(dtype=torch.float64)
+    gradient = torch.from_numpy(posterior["gradient"]).to(dtype=torch.float64)
+    if variance.shape != mean.shape:
+        raise ValueError("posterior_grid.npz fields 'mean' and 'variance' must have matching shapes.")
+    if gradient.ndim != 2 or gradient.shape != (mean.shape[0], 3):
+        raise ValueError("posterior_grid.npz field 'gradient' must have shape (N, 3) matching 'mean'.")
+    return GPISPrediction(mean=mean, variance=variance, gradient=gradient)
 
 
 if __name__ == "__main__":
     main()
-
