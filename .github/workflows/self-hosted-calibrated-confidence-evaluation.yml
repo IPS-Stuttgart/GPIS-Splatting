@@ -118,7 +118,7 @@ jobs:
       - name: Set up Python
         # setup-python@v6 intermittently hangs after installing Python on the
         # temporary self-hosted runners used for these heavy evaluations.
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip

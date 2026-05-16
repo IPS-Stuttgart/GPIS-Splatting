@@ -193,7 +193,7 @@ jobs:
         # Pip caching is intentionally disabled here because Torch/CUDA wheels
         # make the post-job cache save slower than a fresh install on these
         # long-running self-hosted jobs.
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
