@@ -204,21 +204,57 @@ def psnr_arrays(prediction: np.ndarray, target: np.ndarray) -> float:
 
 
 def ssim_arrays(prediction: np.ndarray, target: np.ndarray) -> float:
-    values = []
+    if np.array_equal(prediction, target):
+        return 1.0
     c1 = 0.01**2
     c2 = 0.03**2
-    for channel in range(prediction.shape[2]):
-        pred_channel = prediction[..., channel]
-        target_channel = target[..., channel]
-        mu_x = float(pred_channel.mean())
-        mu_y = float(target_channel.mean())
-        var_x = float(pred_channel.var())
-        var_y = float(target_channel.var())
-        cov_xy = float(((pred_channel - mu_x) * (target_channel - mu_y)).mean())
-        numerator = (2.0 * mu_x * mu_y + c1) * (2.0 * cov_xy + c2)
-        denominator = (mu_x**2 + mu_y**2 + c1) * (var_x + var_y + c2)
-        values.append(numerator / denominator if denominator > 0.0 else 1.0)
-    return float(np.clip(np.mean(values), -1.0, 1.0))
+    window_size = 11
+    radius = window_size // 2
+    kernel = _gaussian_kernel_2d(window_size=window_size, sigma=1.5)
+    mu_x = _gaussian_filter_channels(prediction, kernel)
+    mu_y = _gaussian_filter_channels(target, kernel)
+    mean_xx = _gaussian_filter_channels(prediction * prediction, kernel)
+    mean_yy = _gaussian_filter_channels(target * target, kernel)
+    mean_xy = _gaussian_filter_channels(prediction * target, kernel)
+    sigma_x_sq = np.maximum(mean_xx - mu_x * mu_x, 0.0)
+    sigma_y_sq = np.maximum(mean_yy - mu_y * mu_y, 0.0)
+    sigma_xy = mean_xy - mu_x * mu_y
+    numerator = (2.0 * mu_x * mu_y + c1) * (2.0 * sigma_xy + c2)
+    denominator = (mu_x * mu_x + mu_y * mu_y + c1) * (sigma_x_sq + sigma_y_sq + c2)
+    ssim_map = np.divide(numerator, denominator, out=np.ones_like(numerator), where=denominator > 0.0)
+    core = ssim_map[radius:-radius, radius:-radius, :] if min(prediction.shape[:2]) > window_size else ssim_map
+    return float(np.clip(np.mean(core), -1.0, 1.0))
+
+
+def _gaussian_kernel_2d(*, window_size: int, sigma: float) -> np.ndarray:
+    offsets = np.arange(window_size, dtype=np.float64) - window_size // 2
+    kernel_1d = np.exp(-(offsets**2) / (2.0 * sigma**2))
+    kernel_1d /= kernel_1d.sum()
+    return np.outer(kernel_1d, kernel_1d)
+
+
+def _gaussian_filter_channels(values: np.ndarray, kernel: np.ndarray) -> np.ndarray:
+    try:
+        from scipy.ndimage import convolve  # type: ignore[import-not-found]
+    except ImportError:
+        return _gaussian_filter_channels_slow(values, kernel)
+
+    filtered = np.empty_like(values, dtype=np.float64)
+    for channel in range(values.shape[2]):
+        filtered[..., channel] = convolve(values[..., channel], kernel, mode="reflect")
+    return filtered
+
+
+def _gaussian_filter_channels_slow(values: np.ndarray, kernel: np.ndarray) -> np.ndarray:
+    radius = kernel.shape[0] // 2
+    padded = np.pad(values, ((radius, radius), (radius, radius), (0, 0)), mode="reflect")
+    height, width, channels = values.shape
+    filtered = np.empty((height, width, channels), dtype=np.float64)
+    kernel_3d = kernel[..., np.newaxis]
+    for y in range(height):
+        for x in range(width):
+            filtered[y, x, :] = np.sum(kernel_3d * padded[y : y + kernel.shape[0], x : x + kernel.shape[1], :], axis=(0, 1))
+    return filtered
 
 
 def lpips_arrays(model: Any, prediction: np.ndarray, target: np.ndarray) -> float:
