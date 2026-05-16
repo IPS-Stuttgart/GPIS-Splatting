@@ -72,8 +72,6 @@ def evaluate_tanks_temples_geometry(
         gate_floor=gate_floor,
         gate_batch_size=gate_batch_size,
     )
-    pred_points_raw, pred_indices = deterministic_subsample(pred_points_raw, max_points=max_pred_points, seed=seed)
-    gates = gates[pred_indices] if gates is not None else None
 
     alignment_applied = bool(resolved_alignment is not None) if apply_alignment is None else bool(apply_alignment)
     pred_points = pred_points_raw
@@ -107,11 +105,14 @@ def evaluate_tanks_temples_geometry(
         gates = gates[pred_crop_mask] if gates is not None else None
         gt_points = gt_points[gt_crop_mask]
 
+    pred_count_after_crop = int(pred_points.shape[0])
     if pred_points.size == 0:
-        raise ValueError("No predicted splat centers remain after subsampling/cropping.")
+        raise ValueError("No predicted splat centers remain after alignment/cropping.")
     if gt_points.size == 0:
         raise ValueError("No ground-truth points remain after cropping.")
 
+    pred_points, pred_indices = deterministic_subsample(pred_points, max_points=max_pred_points, seed=seed)
+    gates = gates[pred_indices] if gates is not None else None
     gt_points, gt_indices = deterministic_subsample(gt_points, max_points=max_gt_points, seed=seed + 1)
     gt_count_evaluated = int(gt_points.shape[0])
     pred_count_evaluated = int(pred_points.shape[0])
@@ -183,7 +184,9 @@ def evaluate_tanks_temples_geometry(
         "max_pred_points": max_pred_points,
         "max_gt_points": max_gt_points,
         "pred_count_input": pred_count_input,
-        "pred_count_sampled": int(pred_points_raw.shape[0]),
+        "pred_count_after_crop": pred_count_after_crop,
+        "pred_count_sampled": int(pred_points.shape[0]),
+        "pred_sample_indices_count": int(pred_indices.shape[0]),
         "pred_count_evaluated": pred_count_evaluated,
         "gt_count_input": gt_count_input,
         "gt_count_after_crop": int(crop_summary.get("gt_kept", gt_count_input)),
