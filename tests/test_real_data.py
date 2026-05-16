@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 import torch
 from PIL import Image
 
@@ -29,7 +30,7 @@ from gpis_splatting.cli.run_tanks_temples_hard_negative_calibration import main 
 from gpis_splatting.cli.run_tanks_temples_gate_sweep import main as run_tanks_temples_gate_sweep_main
 from gpis_splatting.cli.validate_real_scene import main as validate_real_scene_main
 from gpis_splatting.real_bootstrap import load_ply_point_cloud
-from gpis_splatting.real_geometry import crop_mask, evaluate_geometry_group, nearest_neighbor_distances
+from gpis_splatting.real_geometry import crop_mask, evaluate_geometry_group, nearest_neighbor_distances, resolve_optional_scene_file, resolve_scene_file
 from gpis_splatting.real_scene import build_sparse_split
 from gpis_splatting.serialization import read_json, write_json
 from gpis_splatting.splats import SplatCloud, load_splats, save_splats
@@ -861,6 +862,26 @@ def test_nearest_neighbor_distances_are_exact_and_chunk_invariant() -> None:
 
     assert np.allclose(distances_one_chunk, [0.0, 1.0, np.sqrt(17.0), 2.0])
     assert np.allclose(distances_small_chunks, distances_one_chunk)
+
+
+def test_scene_file_resolution_accepts_existing_repo_relative_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = tmp_path / "repo"
+    scene_root = repo / "real_scenes" / "prepared_scene"
+    scene_root.mkdir(parents=True)
+    repo_relative_file = repo / "real_scenes" / "_downloads" / "tanks_temples" / "Barn" / "alignment" / "Barn.txt"
+    repo_relative_file.parent.mkdir(parents=True)
+    repo_relative_file.write_text("1 0 0 0\n0 1 0 0\n0 0 1 0\n0 0 0 1\n", encoding="utf-8")
+    scene_relative_file = scene_root / "local_splats.npz"
+    scene_relative_file.write_bytes(b"local")
+
+    monkeypatch.chdir(repo)
+
+    resolved_repo_relative = resolve_optional_scene_file(scene_root, None, "real_scenes/_downloads/tanks_temples/Barn/alignment/Barn.txt")
+    resolved_scene_relative = resolve_scene_file(scene_root, "local_splats.npz", "real_splats.npz")
+
+    assert resolved_repo_relative is not None
+    assert resolved_repo_relative.resolve() == repo_relative_file.resolve()
+    assert resolved_scene_relative.resolve() == scene_relative_file.resolve()
 
 
 def test_evaluate_tanks_temples_geometry_cli(tmp_path: Path) -> None:
