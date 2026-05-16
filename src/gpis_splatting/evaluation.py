@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,8 @@ import pandas as pd
 
 from gpis_splatting.scenes import available_shapes
 from gpis_splatting.serialization import read_json, write_json
+
+_CANONICAL_RENDER_VIEWS = ("front", "side", "top")
 
 EVALUATION_PRESETS: dict[str, dict[str, Any]] = {
     "synthetic_ci": {
@@ -165,8 +168,8 @@ def evaluate_ablation_artifacts(
     metrics = pd.read_csv(metrics_path)
     summary = pd.read_csv(summary_path)
     winners = pd.read_csv(winners_path)
-    view = _resolve_view(metrics)
-    checks = build_evaluation_checks(metrics, summary, winners, preset=preset, view=view)
+    views = _expected_render_views(preset, metrics)
+    checks = build_evaluation_checks(metrics, summary, winners, preset=preset, view=views)
     passed = all(bool(check["passed"]) for check in checks)
 
     status = {
@@ -174,7 +177,8 @@ def evaluate_ablation_artifacts(
         "description": preset["description"],
         "passed": passed,
         "primary_metric": primary_metric,
-        "view": view,
+        "view": _format_view_label(views),
+        "views": views,
         "metrics_path": str(metrics_path),
         "summary_path": str(summary_path),
         "winners_path": str(winners_path),
@@ -227,7 +231,7 @@ def build_evaluation_checks(
     winners: pd.DataFrame,
     *,
     preset: dict[str, Any],
-    view: str,
+    view: str | Sequence[str],
 ) -> list[dict[str, Any]]:
     targets = preset["targets"]
     expected_rows = expected_ablation_rows(preset)
@@ -241,7 +245,9 @@ def build_evaluation_checks(
         "One metrics row is expected for every shape, feedback depth, and selector case.",
     )
 
-    base_columns = ["rmse_sdf", "iou_inside", "nll_distance", "brier_inside", "ece_inside", f"psnr_gpis_{view}"]
+    views = _normalise_views(view)
+    psnr_gpis_columns = [f"psnr_gpis_{render_view}" for render_view in views]
+    base_columns = ["rmse_sdf", "iou_inside", "nll_distance", "brier_inside", "ece_inside", *psnr_gpis_columns]
     missing_base = [column for column in base_columns if column not in metrics.columns]
     _add_check(checks, "base_metric_columns_present", not missing_base, len(missing_base), 0, ", ".join(missing_base))
     if not missing_base:
@@ -255,7 +261,8 @@ def build_evaluation_checks(
         )
 
     feedback_rows = metrics[metrics["feedback_iterations"] > 0] if "feedback_iterations" in metrics else pd.DataFrame()
-    feedback_columns = ["feedback_rmse_sdf", "feedback_iou_inside", f"psnr_feedback_{view}", "feedback_selected_splats"]
+    feedback_psnr_columns = [f"psnr_feedback_{render_view}" for render_view in views]
+    feedback_columns = ["feedback_rmse_sdf", "feedback_iou_inside", *feedback_psnr_columns, "feedback_selected_splats"]
     missing_feedback = [column for column in feedback_columns if column not in metrics.columns]
     _add_check(
         checks,
@@ -279,9 +286,9 @@ def build_evaluation_checks(
         _add_check(checks, "max_rmse_sdf", float(metrics["rmse_sdf"].max()), "<=", targets["max_rmse_sdf"])
     if "iou_inside" in metrics:
         _add_check(checks, "min_iou_inside", float(metrics["iou_inside"].min()), ">=", targets["min_iou_inside"])
-    psnr_col = f"psnr_gpis_{view}"
-    if psnr_col in metrics:
-        _add_check(checks, f"min_{psnr_col}", float(metrics[psnr_col].min()), ">=", targets["min_psnr_gpis"])
+    for psnr_col in psnr_gpis_columns:
+        if psnr_col in metrics:
+            _add_check(checks, f"min_{psnr_col}", float(metrics[psnr_col].min()), ">=", targets["min_psnr_gpis"])
     if {"brier_inside", "ece_inside"}.issubset(metrics.columns):
         probability_ok = bool(metrics["brier_inside"].between(0.0, 1.0).all() and metrics["ece_inside"].between(0.0, 1.0).all())
         _add_check(checks, "calibration_metrics_in_unit_interval", probability_ok, int(probability_ok), 1)
@@ -312,7 +319,7 @@ def format_evaluation_report(status: dict[str, Any], checks_path: Path, config_p
         f"- Description: {status['description']}",
         f"- Passed: `{status['passed']}`",
         f"- Primary metric: `{status['primary_metric']}`",
-        f"- Render view: `{status['view']}`",
+        f"- Render views: `{status['view']}`",
         f"- Metrics: `{status['metrics_path']}`",
         f"- Summary: `{status['summary_path']}`",
         f"- Winners: `{status['winners_path']}`",
@@ -377,11 +384,44 @@ def _add_check(checks: list[dict[str, Any]], name: str, passed_or_value: bool | 
     )
 
 
-def _resolve_view(metrics: pd.DataFrame) -> str:
-    views = sorted(column.removeprefix("psnr_gpis_") for column in metrics.columns if column.startswith("psnr_gpis_"))
+def _expected_render_views(preset: dict[str, Any], metrics: pd.DataFrame) -> list[str]:
+    configured_view = preset.get("ablation", {}).get("view")
+    if isinstance(configured_view, str) and configured_view:
+        return _normalise_views(configured_view)
+    if isinstance(configured_view, Sequence):
+        return _normalise_views(configured_view)
+    return _resolve_views(metrics)
+
+
+def _normalise_views(view: str | Sequence[str]) -> list[str]:
+    if isinstance(view, str):
+        views = list(_CANONICAL_RENDER_VIEWS) if view == "all" else [view]
+    else:
+        views = []
+        for selected_view in view:
+            if selected_view == "all":
+                views.extend(_CANONICAL_RENDER_VIEWS)
+            else:
+                views.append(str(selected_view))
+    if not views:
+        raise ValueError("At least one render view must be selected.")
+    return _sort_views(views)
+
+
+def _resolve_views(metrics: pd.DataFrame) -> list[str]:
+    views = [column.removeprefix("psnr_gpis_") for column in metrics.columns if column.startswith("psnr_gpis_")]
     if not views:
         raise ValueError("Ablation metrics do not contain any psnr_gpis_<view> columns.")
-    return "front" if "front" in views else views[0]
+    return _sort_views(views)
+
+
+def _sort_views(views: list[str]) -> list[str]:
+    order = {view: index for index, view in enumerate(_CANONICAL_RENDER_VIEWS)}
+    return sorted(dict.fromkeys(views), key=lambda render_view: (order.get(render_view, len(order)), render_view))
+
+
+def _format_view_label(views: list[str]) -> str:
+    return views[0] if len(views) == 1 else ", ".join(views)
 
 
 def _best_rows(summary: pd.DataFrame, winners: pd.DataFrame, *, primary_metric: str) -> list[dict[str, Any]]:
