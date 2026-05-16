@@ -36,6 +36,8 @@ DISTORTED_COLMAP_PARAM_INDICES = {
     "OPENCV_FISHEYE": (4, 5, 6, 7),
 }
 
+_PATCHED = False
+
 
 def colmap_intrinsics_from_params(model: str, params: list[float]) -> tuple[float | None, float | None, float | None, float | None]:
     """Return fx, fy, cx, cy for a supported COLMAP camera model."""
@@ -160,6 +162,105 @@ def colmap_model_and_params(
     if model not in {"PINHOLE", "SIMPLE_PINHOLE"}:
         raise ValueError(f"Prepared camera model {model!r} has no params; exporting as PINHOLE would drop distortion.")
     return "PINHOLE", (float(fx), float(fy), float(cx), float(cy))
+
+
+def install_colmap_camera_model_patches() -> None:
+    """Patch legacy real-data paths so COLMAP distortion is not silently ignored."""
+    global _PATCHED
+    if _PATCHED:
+        return
+
+    from gpis_splatting import real_pipeline, real_scene
+
+    real_scene._pinhole_intrinsics_from_colmap = colmap_intrinsics_from_params
+    real_pipeline.project_splats_to_frame = _project_splats_to_frame
+
+    try:
+        from gpis_splatting import prepared_colmap_export
+
+        prepared_colmap_export.build_colmap_cameras = _build_colmap_cameras
+    except Exception:
+        pass
+
+    try:
+        from gpis_splatting import gsplat_adapter
+
+        if not getattr(gsplat_adapter.frame_to_gsplat_camera, "_colmap_distortion_guard", False):
+            original = gsplat_adapter.frame_to_gsplat_camera
+
+            def guarded_frame_to_gsplat_camera(frame: dict[str, Any], *, projection_convention: str, device: str | Any = "auto", dtype: str | Any = "float32"):
+                intrinsics = frame["intrinsics"]
+                if intrinsics_need_nonlinear_projection(intrinsics):
+                    model = str(intrinsics.get("model") or "PINHOLE").upper()
+                    raise ValueError(
+                        f"gsplat_adapter currently renders with camera_model='pinhole'; camera model {model!r} "
+                        "has COLMAP distortion/fisheye projection that would otherwise be ignored. "
+                        "Use undistorted cameras/images or a renderer with this camera model."
+                    )
+                return original(frame, projection_convention=projection_convention, device=device, dtype=dtype)
+
+            guarded_frame_to_gsplat_camera._colmap_distortion_guard = True
+            gsplat_adapter.frame_to_gsplat_camera = guarded_frame_to_gsplat_camera
+    except Exception:
+        pass
+
+    _PATCHED = True
+
+
+def _project_splats_to_frame(
+    splats: Any,
+    frame: dict[str, Any],
+    *,
+    projection_convention: str,
+    near_plane: float,
+) -> dict[str, np.ndarray]:
+    centers = splats.centers.detach().cpu().numpy()
+    world_to_camera = np.asarray(frame["world_to_camera"], dtype=np.float64)
+    if world_to_camera.shape != (4, 4):
+        raise ValueError("Prepared frames must contain a 4x4 world_to_camera matrix.")
+    homogeneous = np.concatenate((centers, np.ones((centers.shape[0], 1), dtype=np.float64)), axis=1)
+    camera_xyz = homogeneous @ world_to_camera.T
+    camera_xyz = camera_xyz[:, :3]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        if projection_convention == "opencv":
+            depth = camera_xyz[:, 2]
+            x_norm = camera_xyz[:, 0] / depth
+            y_norm = camera_xyz[:, 1] / depth
+        elif projection_convention == "opengl":
+            depth = -camera_xyz[:, 2]
+            x_norm = camera_xyz[:, 0] / depth
+            y_norm = -camera_xyz[:, 1] / depth
+        else:
+            raise ValueError("projection_convention must be 'opencv' or 'opengl'.")
+        u, v = project_normalized_points_with_intrinsics(x_norm, y_norm, frame["intrinsics"])
+    centers_px = np.stack((u, v), axis=1)
+    valid = (depth > near_plane) & np.isfinite(depth) & np.isfinite(centers_px).all(axis=1)
+    return {"centers_px": centers_px, "depth": depth, "valid": valid, "camera_xyz": camera_xyz}
+
+
+def _build_colmap_cameras(frames: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[int]]:
+    from gpis_splatting import prepared_colmap_export
+
+    camera_ids_by_key: dict[tuple[float | int | str, ...], int] = {}
+    camera_rows: list[dict[str, Any]] = []
+    frame_camera_ids = []
+    for frame in frames:
+        intrinsics = frame.get("intrinsics") or {}
+        width = prepared_colmap_export.require_int_dimension(frame, intrinsics, "width")
+        height = prepared_colmap_export.require_int_dimension(frame, intrinsics, "height")
+        fx = prepared_colmap_export.require_float_intrinsic(intrinsics, "fx")
+        fy = prepared_colmap_export.require_float_intrinsic(intrinsics, "fy")
+        cx = prepared_colmap_export.require_float_intrinsic(intrinsics, "cx")
+        cy = prepared_colmap_export.require_float_intrinsic(intrinsics, "cy")
+        model, params = colmap_model_and_params(intrinsics, fx=fx, fy=fy, cx=cx, cy=cy)
+        key = (width, height, model, *params)
+        camera_id = camera_ids_by_key.get(key)
+        if camera_id is None:
+            camera_id = len(camera_rows) + 1
+            camera_ids_by_key[key] = camera_id
+            camera_rows.append({"camera_id": camera_id, "model": model, "width": width, "height": height, "params": params})
+        frame_camera_ids.append(camera_id)
+    return camera_rows, frame_camera_ids
 
 
 def _project_pinhole_fields(x: np.ndarray, y: np.ndarray, intrinsics: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
