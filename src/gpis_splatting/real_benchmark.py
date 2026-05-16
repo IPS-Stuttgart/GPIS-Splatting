@@ -9,6 +9,7 @@ import pandas as pd
 
 from gpis_splatting.real_scene import load_prepared_scene, resolve_scene_image_path
 from gpis_splatting.renderer import load_image
+from gpis_splatting.render_metadata import validate_prediction_render_metadata
 from gpis_splatting.serialization import read_json, write_json
 
 
@@ -22,11 +23,13 @@ def evaluate_real_renders(
     benchmark_target: str | Path | None = None,
     compute_lpips: bool = False,
     require_all: bool = True,
+    allow_diagnostic_proxy: bool = False,
 ) -> dict[str, Any]:
     scene_root = Path(scene_dir)
     pred_root = Path(predictions_dir)
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    render_metadata = validate_prediction_render_metadata(predictions_dir=pred_root, allow_diagnostic_proxy=allow_diagnostic_proxy)
 
     scene_meta, frames, splits = load_prepared_scene(scene_root)
     split_indices = splits.get(split)
@@ -76,7 +79,15 @@ def evaluate_real_renders(
 
     metrics = pd.DataFrame(rows)
     target = _load_target(benchmark_target)
-    summary = build_real_summary(metrics, scene_meta=scene_meta, method_name=method_name, split=split, missing_count=len(missing), target=target)
+    summary = build_real_summary(
+        metrics,
+        scene_meta=scene_meta,
+        method_name=method_name,
+        split=split,
+        missing_count=len(missing),
+        target=target,
+        render_metadata=render_metadata,
+    )
     metrics_path = out_dir / f"{method_name}_{split}_image_metrics.csv"
     summary_path = out_dir / f"{method_name}_{split}_summary.csv"
     status_path = out_dir / f"{method_name}_{split}_status.json"
@@ -93,6 +104,8 @@ def evaluate_real_renders(
         "image_count": int(len(metrics)),
         "missing_count": int(len(missing)),
         "lpips_status": lpips_status,
+        "allow_diagnostic_proxy": allow_diagnostic_proxy,
+        "render_metadata": render_metadata,
         "target": target,
         "summary": summary,
     }
@@ -147,6 +160,7 @@ def build_real_summary(
     split: str,
     missing_count: int,
     target: dict[str, Any] | None = None,
+    render_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "scene": scene_meta["scene"],
@@ -159,6 +173,16 @@ def build_real_summary(
         "mean_ssim": float(metrics["ssim"].mean()),
         "mean_lpips_vgg": _mean_or_none(metrics["lpips_vgg"]),
     }
+    if render_metadata is not None:
+        summary.update(
+            {
+                "render_backend": render_metadata.get("backend"),
+                "render_fidelity": render_metadata.get("render_fidelity"),
+                "photometric_metrics_allowed": bool(render_metadata.get("photometric_metrics_allowed", True)),
+                "photometric_metrics_policy": render_metadata.get("photometric_metrics_policy"),
+                "diagnostic_proxy_override": bool(render_metadata.get("diagnostic_proxy_override", False)),
+            }
+        )
     if target is not None:
         baseline_name = target.get("primary_baseline")
         baseline = target.get("reference_baselines", {}).get(baseline_name, {})
@@ -191,6 +215,18 @@ def format_real_report(status: dict[str, Any]) -> str:
         f"- Image metrics: `{status['metrics_path']}`",
         f"- Summary CSV: `{status['summary_path']}`",
     ]
+    render_metadata = status.get("render_metadata") or {}
+    if render_metadata:
+        lines.extend(
+            [
+                f"- Render backend: `{render_metadata.get('backend')}`",
+                f"- Render fidelity: `{render_metadata.get('render_fidelity')}`",
+                f"- Photometric metrics policy: `{render_metadata.get('photometric_metrics_policy')}`",
+                f"- Diagnostic proxy override: `{render_metadata.get('diagnostic_proxy_override', False)}`",
+            ]
+        )
+        if render_metadata.get("render_backend_note"):
+            lines.append(f"- Render note: {render_metadata['render_backend_note']}")
     target = status.get("target")
     if target is not None:
         lines.extend(
