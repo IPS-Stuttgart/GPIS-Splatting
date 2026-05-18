@@ -66,6 +66,16 @@ METRIC_COLUMNS = (
 HIGHER_IS_BETTER = {"precision", "recall", "f_score", "mean_psnr", "mean_ssim", "calibration_auc", "calibration_auprc"}
 LOWER_IS_BETTER = {"chamfer_l1", "chamfer_l2", "mean_lpips_vgg", "calibration_brier", "calibration_ece"}
 DELTA_METRICS = tuple(sorted(HIGHER_IS_BETTER | LOWER_IS_BETTER))
+PROVENANCE_COLUMNS = (*METRIC_COLUMNS, "variant", "variant_kind")
+PROVENANCE_COLUMN_SET = set(PROVENANCE_COLUMNS)
+SOURCE_METADATA_KEYS = {
+    "notes",
+    "source_roles",
+    "source_artifact",
+    "metric_source_roles",
+    "metric_source_artifacts",
+    "metric_conflicts",
+}
 
 
 def default_matrix_cases() -> tuple[MatrixCase, ...]:
@@ -197,6 +207,9 @@ def base_summary_row(case: MatrixCase) -> dict[str, Any]:
         "artifact_count": 0,
         "source_artifact": None,
         "source_roles": "",
+        "metric_source_roles": "",
+        "metric_source_artifacts": "",
+        "metric_conflicts": "",
         "variant": None,
         "variant_kind": None,
         "notes": "",
@@ -212,7 +225,7 @@ def load_case_metrics(case_id: str, config: ExperimentMatrixConfig) -> dict[str,
             load_geometry_summary_metrics(config, "trained_3dgs_geometry_summary"),
         )
     if case_id == "B":
-        return load_gate_sweep_metrics(config, "raw_gate_sweep", note="raw GPIS gate sweep")
+        return attach_metric_sources(load_gate_sweep_metrics(config, "raw_gate_sweep", note="raw GPIS gate sweep"))
     if case_id == "C":
         return merge_metrics(
             load_gate_sweep_metrics(config, "calibrated_gate_sweep", note="calibrated gate sweep"),
@@ -220,7 +233,14 @@ def load_case_metrics(case_id: str, config: ExperimentMatrixConfig) -> dict[str,
             load_calibration_metrics(config, "calibrated_confidence_metrics"),
         )
     if case_id == "D":
-        return load_filtering_metrics(config, "calibrated_filtering_comparison", exclude_kinds={"baseline", "random_same_retention"}, note="calibrated pruning/refinement")
+        return attach_metric_sources(
+            load_filtering_metrics(
+                config,
+                "calibrated_filtering_comparison",
+                exclude_kinds={"baseline", "random_same_retention"},
+                note="calibrated pruning/refinement",
+            )
+        )
     if case_id == "E":
         return merge_metrics(
             load_render_metrics(config, "regularized_3dgs_render_comparison", preferred_variant="baseline"),
@@ -229,17 +249,36 @@ def load_case_metrics(case_id: str, config: ExperimentMatrixConfig) -> dict[str,
     if case_id == "F":
         return merge_metrics(
             load_render_metrics(config, "regularized_calibrated_render_comparison", preferred_variant="gate_scaled"),
-            load_filtering_metrics(config, "regularized_calibrated_filtering_comparison", exclude_kinds={"baseline", "random_same_retention"}, note="regularized plus calibrated filtering"),
+            load_filtering_metrics(
+                config,
+                "regularized_calibrated_filtering_comparison",
+                exclude_kinds={"baseline", "random_same_retention"},
+                note="regularized plus calibrated filtering",
+            ),
         )
     return {}
 
 
 def merge_metrics(*metrics_list: dict[str, Any]) -> dict[str, Any]:
+    """Merge artifact metrics without silent overwrites.
+
+    Earlier arguments have higher precedence. Later artifacts fill missing
+    fields only. If a later artifact contains a different non-missing value for
+    an already-populated metric, the first value is kept and the ignored source
+    is recorded in ``metric_conflicts``. The summary CSV also receives compact
+    ``metric_source_roles`` and ``metric_source_artifacts`` maps so each metric's
+    provenance remains auditable.
+    """
+
     merged: dict[str, Any] = {}
     notes: list[str] = []
     roles: list[str] = []
     sources: list[str] = []
-    for metrics in metrics_list:
+    metric_source_roles: dict[str, str] = {}
+    metric_source_artifacts: dict[str, str] = {}
+    conflicts: list[str] = []
+    for raw_metrics in metrics_list:
+        metrics = attach_metric_sources(raw_metrics)
         if not metrics:
             continue
         if metrics.get("notes"):
@@ -248,18 +287,109 @@ def merge_metrics(*metrics_list: dict[str, Any]) -> dict[str, Any]:
             roles.extend(str(metrics["source_roles"]).split(";"))
         if metrics.get("source_artifact"):
             sources.append(str(metrics["source_artifact"]))
+        if metrics.get("metric_conflicts"):
+            conflicts.extend(split_encoded_list(str(metrics["metric_conflicts"])))
+        role_map = parse_source_map(metrics.get("metric_source_roles"))
+        artifact_map = parse_source_map(metrics.get("metric_source_artifacts"))
+        default_role = first_nonempty(str(metrics.get("source_roles") or "").split(";"))
+        default_artifact = first_nonempty(str(metrics.get("source_artifact") or "").split(";"))
         for key, value in metrics.items():
-            if key in {"notes", "source_roles", "source_artifact"}:
+            if key in SOURCE_METADATA_KEYS:
                 continue
-            if not is_missing(value):
+            if is_missing(value):
+                continue
+            source_role = role_map.get(key) or default_role
+            source_artifact = artifact_map.get(key) or default_artifact
+            if key not in merged or is_missing(merged.get(key)):
                 merged[key] = value
+                if key in PROVENANCE_COLUMN_SET:
+                    if source_role:
+                        metric_source_roles[key] = source_role
+                    if source_artifact:
+                        metric_source_artifacts[key] = source_artifact
+                continue
+            if key in PROVENANCE_COLUMN_SET and not values_equivalent(merged[key], value):
+                kept_source = metric_source_roles.get(key) or "unknown"
+                ignored_source = source_role or "unknown"
+                conflicts.append(f"{key}: kept {kept_source}, ignored {ignored_source}")
     if notes:
         merged["notes"] = "; ".join(dict.fromkeys(notes))
     if roles:
         merged["source_roles"] = ";".join(dict.fromkeys(role for role in roles if role))
     if sources:
         merged["source_artifact"] = ";".join(dict.fromkeys(sources))
+    if metric_source_roles:
+        merged["metric_source_roles"] = format_source_map(metric_source_roles)
+    if metric_source_artifacts:
+        merged["metric_source_artifacts"] = format_source_map(metric_source_artifacts)
+    if conflicts:
+        merged["metric_conflicts"] = "; ".join(dict.fromkeys(conflict for conflict in conflicts if conflict))
     return merged
+
+
+def attach_metric_sources(metrics: dict[str, Any]) -> dict[str, Any]:
+    if not metrics:
+        return {}
+    result = dict(metrics)
+    role_map = parse_source_map(result.get("metric_source_roles"))
+    artifact_map = parse_source_map(result.get("metric_source_artifacts"))
+    default_role = first_nonempty(str(result.get("source_roles") or "").split(";"))
+    default_artifact = first_nonempty(str(result.get("source_artifact") or "").split(";"))
+    for key, value in result.items():
+        if key in SOURCE_METADATA_KEYS or key not in PROVENANCE_COLUMN_SET or is_missing(value):
+            continue
+        if default_role:
+            role_map.setdefault(key, default_role)
+        if default_artifact:
+            artifact_map.setdefault(key, default_artifact)
+    if role_map:
+        result["metric_source_roles"] = format_source_map(role_map)
+    if artifact_map:
+        result["metric_source_artifacts"] = format_source_map(artifact_map)
+    return result
+
+
+def parse_source_map(encoded: Any) -> dict[str, str]:
+    if encoded is None:
+        return {}
+    text = str(encoded)
+    if not text:
+        return {}
+    parsed: dict[str, str] = {}
+    for item in text.split(";"):
+        if not item or "=" not in item:
+            continue
+        key, source = item.split("=", 1)
+        if key and source:
+            parsed[key] = source
+    return parsed
+
+
+def format_source_map(source_map: dict[str, str]) -> str:
+    return ";".join(f"{key}={value}" for key, value in source_map.items() if value)
+
+
+def split_encoded_list(encoded: str) -> list[str]:
+    return [item.strip() for item in encoded.split(";") if item.strip()]
+
+
+def first_nonempty(values: Any) -> str:
+    for value_ in values:
+        text = str(value_).strip()
+        if text:
+            return text
+    return ""
+
+
+def values_equivalent(left: Any, right: Any) -> bool:
+    if is_missing(left) and is_missing(right):
+        return True
+    if is_missing(left) or is_missing(right):
+        return False
+    try:
+        return bool(np.isclose(float(left), float(right), rtol=1e-12, atol=1e-12, equal_nan=True))
+    except (TypeError, ValueError):
+        return str(left) == str(right)
 
 
 def load_render_metrics(config: ExperimentMatrixConfig, role: str, *, preferred_variant: str | None = None) -> dict[str, Any]:
@@ -555,6 +685,8 @@ def summary_columns(summary: pd.DataFrame) -> list[str]:
         "delta_chamfer_l1_vs_baseline",
         "delta_mean_psnr_vs_baseline",
         "source_roles",
+        "metric_source_roles",
+        "metric_conflicts",
     ]
     return [column for column in columns if column in summary]
 

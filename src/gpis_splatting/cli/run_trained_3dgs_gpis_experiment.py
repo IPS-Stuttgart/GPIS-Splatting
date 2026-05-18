@@ -14,14 +14,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scene-dir", default=None)
     parser.add_argument("--trained-ply-path", required=True)
     parser.add_argument("--gpis-model-path", default=None, help="Required unless --gate-path is supplied.")
-    parser.add_argument("--gate-path", default=None, help="Precomputed gate NPZ aligned to the trained PLY.")
+    parser.add_argument("--gate-path", default=None, help="Precomputed full-length gate NPZ aligned to the trained PLY, e.g. from score_large_scale_gpis.")
     parser.add_argument("--method-name", default="trained_3dgs")
     parser.add_argument("--thresholds", type=float, nargs="+", default=[0.02, 0.05, 0.1])
     parser.add_argument("--calibration-threshold", type=float, default=0.05)
     parser.add_argument("--gate-thresholds", type=float, nargs="+", default=[0.25, 0.5, 0.75])
-    parser.add_argument("--max-pred-points", type=int, default=0, help="Use 0 to score all trained Gaussians.")
+    parser.add_argument(
+        "--max-pred-points",
+        type=int,
+        default=0,
+        help="Use 0 to score all trained Gaussians. Positive caps are rejected unless --allow-partial-gpis-scores true.",
+    )
     parser.add_argument("--max-gt-points", type=int, default=150000, help="Use 0 for all GT points.")
-    parser.add_argument("--missing-gate-value", type=float, default=1.0)
+    parser.add_argument("--missing-gate-value", type=float, default=0.0, help="Fallback gate for explicitly allowed partial scoring only.")
+    parser.add_argument(
+        "--allow-partial-gpis-scores",
+        type=str_to_bool,
+        default=False,
+        help="Permit partial trained-Gaussian GPIS scoring. This is intended for diagnostics, not result-bearing variant export.",
+    )
+    parser.add_argument(
+        "--score-use-crop",
+        type=str_to_bool,
+        default=False,
+        help="Apply the scene crop while fitting/calibrating score diagnostics. Disabled by default so every trained Gaussian receives an observed gate.",
+    )
     parser.add_argument("--iteration", type=int, default=30000)
     parser.add_argument("--opacity-mode", choices=["logit", "linear"], default="logit")
     parser.add_argument("--opacity-scale-floor", type=float, default=0.0)
@@ -63,6 +80,8 @@ def main(argv: list[str] | None = None) -> None:
         max_pred_points=coerce_optional_positive_int(args.max_pred_points),
         max_gt_points=coerce_optional_positive_int(args.max_gt_points),
         missing_gate_value=args.missing_gate_value,
+        allow_partial_gpis_scores=args.allow_partial_gpis_scores,
+        score_use_crop=args.score_use_crop,
         iteration=args.iteration,
         opacity_mode=args.opacity_mode,
         opacity_scale_floor=args.opacity_scale_floor,

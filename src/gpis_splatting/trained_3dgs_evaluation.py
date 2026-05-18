@@ -4,10 +4,12 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from gpis_splatting.colmap_render_mapping import LINK_MODES, map_3dgs_renders_to_prepared_scene
 from gpis_splatting.external_3dgs import convert_3dgs_ply_to_splats, evaluate_3dgs_variant_renders, export_3dgs_gpis_variants, resolve_3dgs_variant_prediction_dir
+from gpis_splatting.gaussian_native_features import append_3dgs_native_features_to_field_scores, default_trained_3dgs_feature_sets, register_3dgs_native_calibration_feature_sets
 from gpis_splatting.gsplat_fidelity_adapter import render_3dgs_manifest_with_gsplat
 from gpis_splatting.primary_confidence import run_gpis_splat_score_calibration
 from gpis_splatting.real_field_scores import default_score_lambdas, run_tanks_temples_gpis_field_score_diagnostics
@@ -21,6 +23,80 @@ def coerce_optional_positive_int(value: int | None) -> int | None:
     if value is None or int(value) <= 0:
         return None
     return int(value)
+
+
+def validate_trained_3dgs_scoring_request(*, gaussian_count: int, max_pred_points: int | None, allow_partial_gpis_scores: bool) -> int | None:
+    """Return the effective prediction cap and reject unsafe partial trained-3DGS scoring by default."""
+
+    effective_max_pred_points = coerce_optional_positive_int(max_pred_points)
+    if gaussian_count < 1:
+        raise ValueError("Trained 3DGS scoring requires at least one Gaussian.")
+    if effective_max_pred_points is not None and effective_max_pred_points < gaussian_count and not allow_partial_gpis_scores:
+        raise ValueError(
+            "Partial GPIS scoring is unsafe for trained-3DGS variant export because unscored Gaussians receive a synthetic fallback gate. "
+            f"Requested max_pred_points={effective_max_pred_points} for {gaussian_count} Gaussians. Use --max-pred-points 0 to score every Gaussian, "
+            "precompute a full-length --gate-path with score_large_scale_gpis, or pass --allow-partial-gpis-scores true for diagnostics-only legacy behavior."
+        )
+    return effective_max_pred_points
+
+
+def validate_trained_3dgs_gate_coverage(
+    gate_path: str | Path,
+    *,
+    expected_count: int,
+    allow_partial_gpis_scores: bool = False,
+) -> dict[str, int | float]:
+    """Validate that a gate file gives every trained Gaussian an observed, not fallback-filled, score."""
+
+    if expected_count < 1:
+        raise ValueError("expected_count must be positive.")
+    with np.load(gate_path, allow_pickle=False) as data:
+        if "gate" in data.files:
+            gate = np.asarray(data["gate"], dtype=np.float64).reshape(-1)
+        elif "raw_gate" in data.files:
+            gate = np.asarray(data["raw_gate"], dtype=np.float64).reshape(-1)
+        else:
+            raise ValueError(f"Gate file {gate_path} must contain a 'gate' or 'raw_gate' array.")
+        gate_count = int(gate.shape[0])
+        scored_count = read_optional_npz_int(data, "scored_count")
+        missing_count = read_optional_npz_int(data, "missing_count")
+        if "scored_mask" in data.files:
+            scored_mask = np.asarray(data["scored_mask"], dtype=bool).reshape(-1)
+            if scored_mask.shape[0] != expected_count:
+                raise ValueError(f"Gate scored_mask length {scored_mask.shape[0]} does not match trained Gaussian count {expected_count}.")
+            mask_scored_count = int(scored_mask.sum())
+            scored_count = mask_scored_count if scored_count is None else min(scored_count, mask_scored_count)
+            mask_missing_count = int(scored_mask.shape[0] - mask_scored_count)
+            missing_count = mask_missing_count if missing_count is None else max(missing_count, mask_missing_count)
+
+    if gate_count != expected_count:
+        raise ValueError(f"Gate count {gate_count} does not match trained Gaussian count {expected_count}.")
+    if scored_count is None:
+        scored_count = gate_count if missing_count in (None, 0) else max(0, expected_count - missing_count)
+    if missing_count is None:
+        missing_count = max(0, expected_count - scored_count)
+    if missing_count > 0 and not allow_partial_gpis_scores:
+        raise ValueError(
+            f"Gate file {gate_path} contains fallback gates for {missing_count} of {expected_count} trained Gaussians. "
+            "Use a full-scoring run, pass a full-length gate from score_large_scale_gpis, or pass --allow-partial-gpis-scores true only for diagnostics."
+        )
+    return {
+        "expected_count": expected_count,
+        "gate_count": gate_count,
+        "scored_count": int(scored_count),
+        "missing_count": int(missing_count),
+        "scored_fraction": float(scored_count / expected_count),
+        "missing_fraction": float(missing_count / expected_count),
+    }
+
+
+def read_optional_npz_int(data: np.lib.npyio.NpzFile, key: str) -> int | None:
+    if key not in data.files:
+        return None
+    values = np.asarray(data[key]).reshape(-1)
+    if values.size == 0:
+        return None
+    return int(values[0])
 
 
 def run_trained_3dgs_gpis_experiment(
@@ -43,7 +119,9 @@ def run_trained_3dgs_gpis_experiment(
     max_pred_points: int | None = None,
     max_gt_points: int | None = 150000,
     seed: int = 13,
-    missing_gate_value: float = 1.0,
+    missing_gate_value: float = 0.0,
+    allow_partial_gpis_scores: bool = False,
+    score_use_crop: bool = False,
     iteration: int = 30000,
     opacity_mode: str = "logit",
     opacity_scale_floor: float = 0.0,
@@ -98,9 +176,15 @@ def run_trained_3dgs_gpis_experiment(
 
     convert = convert_3dgs_ply_to_splats(ply_path=trained_ply, output_splats_path=splats_out, opacity_mode=opacity_mode)
     gaussian_count = int(convert["status"]["splat_count"])
+    effective_max_pred_points = validate_trained_3dgs_scoring_request(
+        gaussian_count=gaussian_count,
+        max_pred_points=max_pred_points,
+        allow_partial_gpis_scores=allow_partial_gpis_scores,
+    )
 
     scoring = None
     calibration = None
+    native_feature_augmentation = None
     if gate_path is None:
         if gpis_model_path is None:
             raise ValueError("Pass --gpis-model-path or --gate-path.")
@@ -113,17 +197,25 @@ def run_trained_3dgs_gpis_experiment(
             thresholds=thresholds,
             topk_fractions=topk_fractions or (0.01, 0.02, 0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0),
             score_lambdas=score_lambdas or default_score_lambdas(),
-            max_pred_points=max_pred_points,
+            max_pred_points=effective_max_pred_points,
             max_gt_points=max_gt_points,
             seed=seed,
+            use_crop=score_use_crop,
         )
-        calibration = run_gpis_splat_score_calibration(
+        native_feature_augmentation = append_3dgs_native_features_to_field_scores(
             field_scores_path=scoring["field_scores_path"],
+            ply_path=trained_ply,
+            output_path=eval_dir / f"{method_name}_gpis_field_scores_with_3dgs_native.csv",
+            opacity_mode=opacity_mode,
+        )
+        register_3dgs_native_calibration_feature_sets()
+        calibration = run_gpis_splat_score_calibration(
+            field_scores_path=native_feature_augmentation["field_scores_path"],
             output_dir=eval_dir,
             method_name=method_name,
             thresholds=thresholds,
             topk_fractions=topk_fractions or (0.01, 0.02, 0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0),
-            feature_sets=feature_sets or ("gpis_core", "gpis_plus_current_gate", "gpis_all"),
+            feature_sets=feature_sets or default_trained_3dgs_feature_sets(),
             seed=seed,
             gate_count=gaussian_count,
             missing_gate_value=missing_gate_value,
@@ -132,6 +224,11 @@ def run_trained_3dgs_gpis_experiment(
         effective_gate_path = Path(calibration["primary_gate_path"])
     else:
         effective_gate_path = Path(gate_path)
+    gate_coverage = validate_trained_3dgs_gate_coverage(
+        effective_gate_path,
+        expected_count=gaussian_count,
+        allow_partial_gpis_scores=allow_partial_gpis_scores,
+    )
 
     variants = export_3dgs_gpis_variants(
         input_ply_path=trained_ply,
@@ -233,7 +330,14 @@ def run_trained_3dgs_gpis_experiment(
         "gaussian_count": gaussian_count,
         "gpis_model_path": None if gpis_model_path is None else str(gpis_model_path),
         "gate_path": str(effective_gate_path),
+        "gate_coverage": gate_coverage,
+        "max_pred_points": effective_max_pred_points,
+        "score_use_crop": score_use_crop,
+        "allow_partial_gpis_scores": allow_partial_gpis_scores,
         "calibration_threshold": calibration_threshold,
+        "native_feature_augmented_field_scores_path": None if native_feature_augmentation is None else str(native_feature_augmentation["field_scores_path"]),
+        "native_feature_status_path": None if native_feature_augmentation is None else str(native_feature_augmentation["status_path"]),
+        "calibration_feature_sets": None if calibration is None else list(calibration["status"].get("feature_sets", [])),
         "variants_manifest_path": str(variants["manifest_path"]),
         "renderer": renderer,
         "render_predictions_root": None if predictions_root is None else str(predictions_root),
@@ -244,7 +348,19 @@ def run_trained_3dgs_gpis_experiment(
     }
     write_json(status_path, status)
     report_path.write_text(format_report(status, variants.get("manifest"), None if render_evaluation is None else render_evaluation.get("comparison")), encoding="utf-8")
-    return {"status": status, "status_path": status_path, "report_path": report_path, "convert": convert, "scoring": scoring, "calibration": calibration, "variants": variants, "render_status": render_status, "mapped_render_statuses": mapped_statuses, "render_evaluation": render_evaluation}
+    return {
+        "status": status,
+        "status_path": status_path,
+        "report_path": report_path,
+        "convert": convert,
+        "scoring": scoring,
+        "native_feature_augmentation": native_feature_augmentation,
+        "calibration": calibration,
+        "variants": variants,
+        "render_status": render_status,
+        "mapped_render_statuses": mapped_statuses,
+        "render_evaluation": render_evaluation,
+    }
 
 
 def render_external_variants(manifest_path: str | Path, render_root: Path, scene_dir: Path, command_template: str, iteration: int) -> Path:
@@ -254,12 +370,29 @@ def render_external_variants(manifest_path: str | Path, render_root: Path, scene
         variant = str(row["variant"])
         output_dir = render_root / variant
         output_dir.mkdir(parents=True, exist_ok=True)
-        command = command_template.format(model_dir=row["model_dir"], output_dir=output_dir, scene_dir=scene_dir, variant=variant, iteration=iteration, point_cloud_path=row["point_cloud_path"])
+        command = command_template.format(
+            model_dir=row["model_dir"],
+            output_dir=output_dir,
+            scene_dir=scene_dir,
+            variant=variant,
+            iteration=iteration,
+            point_cloud_path=row["point_cloud_path"],
+        )
         subprocess.run(command, shell=True, check=True)
     return render_root
 
 
-def map_rendered_variants(*, manifest_path: str | Path, predictions_root: Path, scene_dir: Path, method_name: str, prediction_subdir: str, render_name_map_path: str | Path, link_mode: str, require_all: bool) -> tuple[Path, str, list[dict[str, Any]]]:
+def map_rendered_variants(
+    *,
+    manifest_path: str | Path,
+    predictions_root: Path,
+    scene_dir: Path,
+    method_name: str,
+    prediction_subdir: str,
+    render_name_map_path: str | Path,
+    link_mode: str,
+    require_all: bool,
+) -> tuple[Path, str, list[dict[str, Any]]]:
     manifest = pd.read_csv(manifest_path)
     map_path = Path(render_name_map_path)
     if not map_path.is_absolute() and not map_path.exists():
@@ -270,7 +403,14 @@ def map_rendered_variants(*, manifest_path: str | Path, predictions_root: Path, 
         raw_dir = resolve_3dgs_variant_prediction_dir(predictions_root, manifest_row=row, method_name=method_name, prediction_subdir=prediction_subdir)
         if raw_dir is None:
             raise FileNotFoundError(f"Could not find rendered prediction directory for variant {row.variant!r} under {predictions_root}.")
-        result = map_3dgs_renders_to_prepared_scene(map_path=map_path, renders_dir=raw_dir, output_dir=mapped_root / str(row.variant), link_mode=link_mode, require_all=require_all, overwrite=True)
+        result = map_3dgs_renders_to_prepared_scene(
+            map_path=map_path,
+            renders_dir=raw_dir,
+            output_dir=mapped_root / str(row.variant),
+            link_mode=link_mode,
+            require_all=require_all,
+            overwrite=True,
+        )
         statuses.append(result["status"])
     return mapped_root, "", statuses
 
@@ -284,6 +424,9 @@ def format_report(status: dict[str, Any], manifest: pd.DataFrame | None, compari
         f"- Trained PLY: `{status['trained_ply_path']}`",
         f"- Gaussians: `{status['gaussian_count']}`",
         f"- Gate: `{status['gate_path']}`",
+        f"- Gate coverage: `{status['gate_coverage']['scored_count']}/{status['gate_coverage']['expected_count']}` scored",
+        f"- Native 3DGS feature CSV: `{status.get('native_feature_augmented_field_scores_path') or 'not used'}`",
+        f"- Calibration feature sets: `{', '.join(status.get('calibration_feature_sets') or []) or 'n/a'}`",
         f"- Variants: `{status['variants_manifest_path']}`",
         f"- Renderer: `{status['renderer']}`",
         f"- Render evaluation: `{status['render_evaluation_path'] or 'not run'}`",
@@ -291,6 +434,10 @@ def format_report(status: dict[str, Any], manifest: pd.DataFrame | None, compari
     if manifest is not None and not manifest.empty:
         lines.extend(["", "## Variants", "", manifest[["variant", "variant_kind", "retained_count", "retention_fraction", "opacity_scaled"]].to_markdown(index=False)])
     if comparison is not None and not comparison.empty:
-        cols = [c for c in ["variant", "variant_kind", "retained_count", "retention_fraction", "mean_psnr", "mean_ssim", "mean_lpips_vgg", "image_count"] if c in comparison.columns]
+        cols = [
+            c
+            for c in ["variant", "variant_kind", "retained_count", "retention_fraction", "mean_psnr", "mean_ssim", "mean_lpips_vgg", "image_count"]
+            if c in comparison.columns
+        ]
         lines.extend(["", "## Render metrics", "", comparison[cols].to_markdown(index=False)])
     return "\n".join(lines) + "\n"

@@ -6,12 +6,42 @@ import pandas as pd
 import pytest
 
 from gpis_splatting.cli.run_experiment_matrix import collect_artifact_paths
-from gpis_splatting.experiment_matrix import ExperimentMatrixConfig, run_experiment_matrix
+from gpis_splatting.experiment_matrix import ExperimentMatrixConfig, merge_metrics, run_experiment_matrix
 
 
 def write_csv(path: Path, rows: list[dict[str, object]]) -> Path:
     pd.DataFrame(rows).to_csv(path, index=False)
     return path
+
+
+def test_merge_metrics_keeps_first_non_missing_values_and_reports_conflicts() -> None:
+    merged = merge_metrics(
+        {
+            "source_roles": "render_comparison",
+            "source_artifact": "render.csv",
+            "notes": "render comparison",
+            "variant": "baseline",
+            "mean_psnr": 25.0,
+        },
+        {
+            "source_roles": "geometry_summary",
+            "source_artifact": "geometry.csv",
+            "notes": "geometry summary",
+            "variant": "all",
+            "mean_psnr": 27.0,
+            "chamfer_l1": 0.1,
+        },
+    )
+
+    assert merged["variant"] == "baseline"
+    assert merged["mean_psnr"] == 25.0
+    assert merged["chamfer_l1"] == 0.1
+    assert merged["source_roles"] == "render_comparison;geometry_summary"
+    assert "variant=render_comparison" in merged["metric_source_roles"]
+    assert "mean_psnr=render_comparison" in merged["metric_source_roles"]
+    assert "chamfer_l1=geometry_summary" in merged["metric_source_roles"]
+    assert "variant: kept render_comparison, ignored geometry_summary" in merged["metric_conflicts"]
+    assert "mean_psnr: kept render_comparison, ignored geometry_summary" in merged["metric_conflicts"]
 
 
 def test_run_experiment_matrix_aggregates_available_cases(tmp_path: Path) -> None:
@@ -119,7 +149,9 @@ def test_run_experiment_matrix_aggregates_available_cases(tmp_path: Path) -> Non
     assert checks.loc["D", "passed"]
     assert not checks.loc["E", "passed"]
     assert summary.loc["A", "mean_psnr"] == 25.0
+    assert "mean_psnr=trained_3dgs_render_comparison" in summary.loc["A", "metric_source_roles"]
     assert summary.loc["B", "gate_threshold"] == 0.25
+    assert "gate_threshold=raw_gate_sweep" in summary.loc["B", "metric_source_roles"]
     assert summary.loc["C", "variant_kind"] == "gate_scaled"
     assert summary.loc["D", "variant"] == "gate_ge_0p5"
     assert summary.loc["D", "f_score"] == 0.69
