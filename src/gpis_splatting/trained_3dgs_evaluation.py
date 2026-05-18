@@ -12,6 +12,7 @@ from gpis_splatting.gsplat_fidelity_adapter import render_3dgs_manifest_with_gsp
 from gpis_splatting.primary_confidence import run_gpis_splat_score_calibration
 from gpis_splatting.real_field_scores import default_score_lambdas, run_tanks_temples_gpis_field_score_diagnostics
 from gpis_splatting.real_geometry import format_threshold_label
+from gpis_splatting.real_score_calibration import default_feature_sets
 from gpis_splatting.serialization import write_json
 
 TRAINED_3DGS_RENDERERS = ("none", "gsplat", "external", "precomputed")
@@ -123,7 +124,7 @@ def run_trained_3dgs_gpis_experiment(
             method_name=method_name,
             thresholds=thresholds,
             topk_fractions=topk_fractions or (0.01, 0.02, 0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0),
-            feature_sets=feature_sets or ("gpis_core", "gpis_plus_current_gate", "gpis_all"),
+            feature_sets=feature_sets or default_feature_sets(),
             seed=seed,
             gate_count=gaussian_count,
             missing_gate_value=missing_gate_value,
