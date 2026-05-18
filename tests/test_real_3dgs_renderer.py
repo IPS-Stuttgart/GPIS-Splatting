@@ -7,6 +7,7 @@ import torch
 
 from gpis_splatting.external_3dgs import opacity_to_alpha
 from gpis_splatting.real_3dgs_renderer import render_real_3dgs_splats
+from gpis_splatting.render_metadata import render_metadata_from_report
 
 
 def test_render_real_3dgs_splats_scales_opacity_and_preserves_fields(tmp_path: Path) -> None:
@@ -40,7 +41,18 @@ def test_render_real_3dgs_splats_scales_opacity_and_preserves_fields(tmp_path: P
     assert (Path(result["output_dir"]) / "frame_000001.png").exists()
     assert Path(result["report"]["gated_ply_path"]).exists()
     assert result["report"]["renderer_backend"] == "gsplat"
+    assert result["report"]["backend"] == "gsplat"
+    assert result["report"]["render_fidelity"] == "faithful_3dgs"
+    assert result["report"]["photometric_metrics_allowed"] is True
+    assert result["report"]["photometric_metrics_policy"] == "allowed"
     assert result["report"]["gate_summary"]["source"] == "external"
+
+    metadata = render_metadata_from_report(result["report"], report_path=Path(result["report_path"]))
+    assert metadata["backend"] == "gsplat"
+    assert metadata["render_fidelity"] == "faithful_3dgs"
+    assert metadata["photometric_metrics_allowed"] is True
+    assert metadata["photometric_metrics_policy"] == "allowed"
+
     assert calls
     call = calls[0]
     assert call["scales"].shape == (2, 3)
