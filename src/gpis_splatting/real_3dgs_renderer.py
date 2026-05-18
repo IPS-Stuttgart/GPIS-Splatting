@@ -11,6 +11,7 @@ from gpis_splatting.gpis import load_model
 from gpis_splatting.gsplat_fidelity_adapter import render_3dgs_ply_with_gsplat
 from gpis_splatting.real_pipeline import load_external_gate
 from gpis_splatting.real_scene import load_prepared_scene
+from gpis_splatting.render_metadata import faithful_3dgs_render_metadata
 from gpis_splatting.serialization import write_json
 from gpis_splatting.splats import SplatCloud, gpis_gate_for_splats
 
@@ -175,6 +176,7 @@ def render_real_3dgs_splats(
         "schema_version": 2,
         "scene": scene_meta["scene"],
         "method": resolved_method,
+        **faithful_3dgs_render_metadata(),
         "renderer_backend": "gsplat",
         "backend_report_path": str(gsplat_result["report_path"]),
         "split": split,
