@@ -76,14 +76,6 @@ def bootstrap_real_gpis(
     )
     splats = splats_from_point_cloud(cloud, tau=splat_tau, sigma=splat_sigma)
 
-    samples_path = scene_root / f"{output_prefix}_samples.npz"
-    splats_path = scene_root / f"{output_prefix}_splats.npz"
-    config_path = scene_root / f"{output_prefix}_gpis_config.json"
-    report_path = scene_root / f"{output_prefix}_bootstrap_report.json"
-    np.savez_compressed(samples_path, **samples)
-    from gpis_splatting.splats import save_splats
-
-    save_splats(str(splats_path), splats)
     config = {
         "schema_version": 1,
         "scene": scene_meta["scene"],
@@ -104,16 +96,46 @@ def bootstrap_real_gpis(
         "splat_tau": splat_tau,
         "splat_sigma": splat_sigma,
     }
+    return write_bootstrap_outputs(
+        scene_root=scene_root,
+        output_prefix=output_prefix,
+        samples=samples,
+        splats=splats,
+        config=config,
+        surface_point_count=int(cloud.points.shape[0]),
+    )
+
+
+def write_bootstrap_outputs(
+    *,
+    scene_root: Path,
+    output_prefix: str,
+    samples: dict[str, np.ndarray],
+    splats: SplatCloud,
+    config: dict[str, Any],
+    surface_point_count: int,
+    report_extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    samples_path = scene_root / f"{output_prefix}_samples.npz"
+    splats_path = scene_root / f"{output_prefix}_splats.npz"
+    config_path = scene_root / f"{output_prefix}_gpis_config.json"
+    report_path = scene_root / f"{output_prefix}_bootstrap_report.json"
+    np.savez_compressed(samples_path, **samples)
+    from gpis_splatting.splats import save_splats
+
+    save_splats(str(splats_path), splats)
     report = {
         **config,
-        "surface_point_count": int(cloud.points.shape[0]),
+        "surface_point_count": int(surface_point_count),
         "sample_count": int(samples["points"].shape[0]),
         "free_space_sample_count": int((samples["sample_type"] == SAMPLE_TYPE_IDS["free_space"]).sum()),
         "behind_surface_sample_count": int((samples["sample_type"] == SAMPLE_TYPE_IDS["behind_surface"]).sum()),
-        "splat_count": int(cloud.points.shape[0]),
+        "splat_count": int(surface_point_count),
         "samples_path": str(samples_path),
         "splats_path": str(splats_path),
     }
+    if report_extra:
+        report.update(report_extra)
     write_json(config_path, config)
     write_json(report_path, report)
     return {

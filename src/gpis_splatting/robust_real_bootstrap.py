@@ -2,16 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 
-from gpis_splatting.real_bootstrap import SAMPLE_TYPE_IDS, POINT_SOURCES, load_ply_point_cloud, resolve_point_source, splats_from_point_cloud
+from gpis_splatting.real_bootstrap import (
+    POINT_SOURCES,
+    SAMPLE_TYPE_IDS,
+    load_ply_point_cloud,
+    resolve_point_source,
+    splats_from_point_cloud,
+    write_bootstrap_outputs,
+)
 from gpis_splatting.real_scene import load_prepared_scene
-from gpis_splatting.serialization import write_json
-
-if TYPE_CHECKING:
-    from gpis_splatting.splats import SplatCloud
 
 
 @dataclass(frozen=True)
@@ -82,14 +85,6 @@ def bootstrap_robust_real_gpis(
     )
     splats = splats_from_point_cloud(cloud, tau=splat_tau, sigma=splat_sigma)
 
-    samples_path = scene_root / f"{output_prefix}_samples.npz"
-    splats_path = scene_root / f"{output_prefix}_splats.npz"
-    config_path = scene_root / f"{output_prefix}_gpis_config.json"
-    report_path = scene_root / f"{output_prefix}_bootstrap_report.json"
-    np.savez_compressed(samples_path, **samples)
-    from gpis_splatting.splats import save_splats
-
-    save_splats(str(splats_path), splats)
     config = {
         "schema_version": 1,
         "scene": scene_meta["scene"],
@@ -116,28 +111,19 @@ def bootstrap_robust_real_gpis(
         "max_views_per_point": max_views_per_point,
         "visibility_distance_factor": visibility_distance_factor,
     }
-    report = {
-        **config,
-        "point_filter": filter_report,
-        "surface_point_count": int(cloud.points.shape[0]),
-        "sample_count": int(samples["points"].shape[0]),
-        "free_space_sample_count": int((samples["sample_type"] == SAMPLE_TYPE_IDS["free_space"]).sum()),
-        "behind_surface_sample_count": int((samples["sample_type"] == SAMPLE_TYPE_IDS["behind_surface"]).sum()),
-        "mean_ray_view_count": float(samples["ray_view_count"].mean()) if samples["ray_view_count"].size else 0.0,
-        "max_ray_view_count": int(samples["ray_view_count"].max()) if samples["ray_view_count"].size else 0,
-        "splat_count": int(cloud.points.shape[0]),
-        "samples_path": str(samples_path),
-        "splats_path": str(splats_path),
-    }
-    write_json(config_path, config)
-    write_json(report_path, report)
-    return {
-        "samples_path": samples_path,
-        "splats_path": splats_path,
-        "config_path": config_path,
-        "report_path": report_path,
-        "report": report,
-    }
+    return write_bootstrap_outputs(
+        scene_root=scene_root,
+        output_prefix=output_prefix,
+        samples=samples,
+        splats=splats,
+        config=config,
+        surface_point_count=int(cloud.points.shape[0]),
+        report_extra={
+            "point_filter": filter_report,
+            "mean_ray_view_count": float(samples["ray_view_count"].mean()) if samples["ray_view_count"].size else 0.0,
+            "max_ray_view_count": int(samples["ray_view_count"].max()) if samples["ray_view_count"].size else 0,
+        },
+    )
 
 
 def load_robust_sparse_point_cloud(
