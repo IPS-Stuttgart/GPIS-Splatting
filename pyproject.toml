@@ -67,6 +67,7 @@ export_prepared_scene_to_colmap_3dgs = "gpis_splatting.cli.export_prepared_scene
 map_3dgs_renders_to_prepared_scene = "gpis_splatting.cli.map_3dgs_renders_to_prepared_scene:main"
 export_3dgs_gpis_variants = "gpis_splatting.cli.export_3dgs_gpis_variants:main"
 evaluate_3dgs_variant_renders = "gpis_splatting.cli.evaluate_3dgs_variant_renders:main"
+select_3dgs_pareto_variant = "gpis_splatting.cli.select_3dgs_pareto_variant:main"
 render_3dgs_with_gsplat = "gpis_splatting.cli.render_3dgs_with_gsplat:main"
 validate_3dgs_baseline_photometry = "gpis_splatting.cli.validate_3dgs_baseline_photometry:main"
 run_trained_3dgs_gpis_experiment = "gpis_splatting.cli.run_trained_3dgs_gpis_experiment:main"
