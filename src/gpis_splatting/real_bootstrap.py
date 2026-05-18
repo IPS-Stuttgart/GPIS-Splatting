@@ -8,6 +8,7 @@ import numpy as np
 
 from gpis_splatting.real_scene import load_prepared_scene
 from gpis_splatting.serialization import write_json
+from gpis_splatting.splats import save_splats
 
 if TYPE_CHECKING:
     from gpis_splatting.splats import SplatCloud
@@ -121,7 +122,6 @@ def write_bootstrap_outputs(
     config_path = scene_root / f"{output_prefix}_gpis_config.json"
     report_path = scene_root / f"{output_prefix}_bootstrap_report.json"
     np.savez_compressed(samples_path, **samples)
-    from gpis_splatting.splats import save_splats
 
     save_splats(str(splats_path), splats)
     report = {
