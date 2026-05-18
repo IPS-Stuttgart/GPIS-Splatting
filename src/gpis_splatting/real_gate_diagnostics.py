@@ -237,12 +237,9 @@ def prepare_gate_diagnostic_inputs(
     if gates is None:
         raise ValueError("Gate diagnostics require --gate-path or --model-path so splat gates can be evaluated.")
 
-    pred_points_raw, pred_indices = deterministic_subsample(pred_points_raw, max_points=max_pred_points, seed=seed)
-    gates = gates[pred_indices]
-    splat_indices = pred_indices.copy()
-
     alignment_applied = bool(resolved_alignment is not None) if apply_alignment is None else bool(apply_alignment)
     pred_points = pred_points_raw
+    splat_indices = np.arange(pred_count_input, dtype=np.int64)
     if alignment_applied:
         if resolved_alignment is None:
             raise FileNotFoundError("Alignment was requested but no alignment file was resolved.")
@@ -274,10 +271,13 @@ def prepare_gate_diagnostic_inputs(
         gt_points = gt_points[gt_crop]
 
     if pred_points.size == 0:
-        raise ValueError("No predicted splat centers remain after subsampling/cropping.")
+        raise ValueError("No predicted splat centers remain after alignment/cropping.")
     if gt_points.size == 0:
         raise ValueError("No ground-truth points remain after cropping.")
 
+    pred_points, pred_sample_indices = deterministic_subsample(pred_points, max_points=max_pred_points, seed=seed)
+    gates = gates[pred_sample_indices]
+    splat_indices = splat_indices[pred_sample_indices]
     gt_points, _ = deterministic_subsample(gt_points, max_points=max_gt_points, seed=seed + 1)
     return GateDiagnosticInputs(
         scene_meta=scene_meta,
@@ -294,7 +294,7 @@ def prepare_gate_diagnostic_inputs(
         gates=gates,
         splat_indices=splat_indices,
         pred_count_input=pred_count_input,
-        pred_count_sampled=int(pred_points_raw.shape[0]),
+        pred_count_sampled=int(pred_points.shape[0]),
         pred_count_evaluated=int(pred_points.shape[0]),
         gt_count_input=gt_count_input,
         gt_count_evaluated=int(gt_points.shape[0]),
