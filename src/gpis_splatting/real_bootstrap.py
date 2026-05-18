@@ -126,11 +126,11 @@ def write_bootstrap_outputs(
     save_splats(str(splats_path), splats)
     report = {
         **config,
-        "surface_point_count": int(surface_point_count),
+        "surface_point_count": surface_point_count,
         "sample_count": int(samples["points"].shape[0]),
         "free_space_sample_count": int((samples["sample_type"] == SAMPLE_TYPE_IDS["free_space"]).sum()),
         "behind_surface_sample_count": int((samples["sample_type"] == SAMPLE_TYPE_IDS["behind_surface"]).sum()),
-        "splat_count": int(surface_point_count),
+        "splat_count": surface_point_count,
         "samples_path": str(samples_path),
         "splats_path": str(splats_path),
     }
