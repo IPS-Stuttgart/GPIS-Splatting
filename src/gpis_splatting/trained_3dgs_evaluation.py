@@ -9,6 +9,7 @@ import pandas as pd
 
 from gpis_splatting.colmap_render_mapping import LINK_MODES, map_3dgs_renders_to_prepared_scene
 from gpis_splatting.external_3dgs import convert_3dgs_ply_to_splats, evaluate_3dgs_variant_renders, export_3dgs_gpis_variants, resolve_3dgs_variant_prediction_dir
+from gpis_splatting.gaussian_native_features import append_3dgs_native_features_to_field_scores, default_trained_3dgs_feature_sets, register_3dgs_native_calibration_feature_sets
 from gpis_splatting.gsplat_fidelity_adapter import render_3dgs_manifest_with_gsplat
 from gpis_splatting.primary_confidence import run_gpis_splat_score_calibration
 from gpis_splatting.real_field_scores import default_score_lambdas, run_tanks_temples_gpis_field_score_diagnostics
@@ -183,6 +184,7 @@ def run_trained_3dgs_gpis_experiment(
 
     scoring = None
     calibration = None
+    native_feature_augmentation = None
     if gate_path is None:
         if gpis_model_path is None:
             raise ValueError("Pass --gpis-model-path or --gate-path.")
@@ -200,13 +202,20 @@ def run_trained_3dgs_gpis_experiment(
             seed=seed,
             use_crop=score_use_crop,
         )
-        calibration = run_gpis_splat_score_calibration(
+        native_feature_augmentation = append_3dgs_native_features_to_field_scores(
             field_scores_path=scoring["field_scores_path"],
+            ply_path=trained_ply,
+            output_path=eval_dir / f"{method_name}_gpis_field_scores_with_3dgs_native.csv",
+            opacity_mode=opacity_mode,
+        )
+        register_3dgs_native_calibration_feature_sets()
+        calibration = run_gpis_splat_score_calibration(
+            field_scores_path=native_feature_augmentation["field_scores_path"],
             output_dir=eval_dir,
             method_name=method_name,
             thresholds=thresholds,
             topk_fractions=topk_fractions or (0.01, 0.02, 0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0),
-            feature_sets=feature_sets or ("gpis_core", "gpis_plus_current_gate", "gpis_all"),
+            feature_sets=feature_sets or default_trained_3dgs_feature_sets(),
             seed=seed,
             gate_count=gaussian_count,
             missing_gate_value=missing_gate_value,
@@ -326,6 +335,9 @@ def run_trained_3dgs_gpis_experiment(
         "score_use_crop": score_use_crop,
         "allow_partial_gpis_scores": allow_partial_gpis_scores,
         "calibration_threshold": calibration_threshold,
+        "native_feature_augmented_field_scores_path": None if native_feature_augmentation is None else str(native_feature_augmentation["field_scores_path"]),
+        "native_feature_status_path": None if native_feature_augmentation is None else str(native_feature_augmentation["status_path"]),
+        "calibration_feature_sets": None if calibration is None else list(calibration["status"].get("feature_sets", [])),
         "variants_manifest_path": str(variants["manifest_path"]),
         "renderer": renderer,
         "render_predictions_root": None if predictions_root is None else str(predictions_root),
@@ -342,6 +354,7 @@ def run_trained_3dgs_gpis_experiment(
         "report_path": report_path,
         "convert": convert,
         "scoring": scoring,
+        "native_feature_augmentation": native_feature_augmentation,
         "calibration": calibration,
         "variants": variants,
         "render_status": render_status,
@@ -412,6 +425,8 @@ def format_report(status: dict[str, Any], manifest: pd.DataFrame | None, compari
         f"- Gaussians: `{status['gaussian_count']}`",
         f"- Gate: `{status['gate_path']}`",
         f"- Gate coverage: `{status['gate_coverage']['scored_count']}/{status['gate_coverage']['expected_count']}` scored",
+        f"- Native 3DGS feature CSV: `{status.get('native_feature_augmented_field_scores_path') or 'not used'}`",
+        f"- Calibration feature sets: `{', '.join(status.get('calibration_feature_sets') or []) or 'n/a'}`",
         f"- Variants: `{status['variants_manifest_path']}`",
         f"- Renderer: `{status['renderer']}`",
         f"- Render evaluation: `{status['render_evaluation_path'] or 'not run'}`",
