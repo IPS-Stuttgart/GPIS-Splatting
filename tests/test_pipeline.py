@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from gpis_splatting.cli.evaluate import main as evaluate_main
@@ -11,6 +12,8 @@ from gpis_splatting.cli.render_splats import main as render_main
 from gpis_splatting.cli.run_ablation import main as ablation_main
 from gpis_splatting.cli.run_evaluation import main as evaluation_main
 from gpis_splatting.cli.summarize_ablation import main as summarize_main
+from gpis_splatting.serialization import read_json
+from gpis_splatting.splats import load_splats
 
 
 def test_small_end_to_end_pipeline(tmp_path: Path) -> None:
@@ -88,6 +91,95 @@ def test_small_end_to_end_pipeline(tmp_path: Path) -> None:
     assert metrics["psnr_gpis_front"] >= metrics["psnr_plain_front"]
     assert "psnr_feedback_front" in metrics
     assert "feedback_rmse_sdf" in metrics
+
+
+def test_render_splats_regenerates_cache_when_generation_arguments_change(tmp_path: Path) -> None:
+    root = tmp_path / "experiments"
+    scene = "sphere_splat_cache_regression"
+
+    generate_main(
+        [
+            "--shape",
+            "sphere",
+            "--scene",
+            scene,
+            "--num-points",
+            "32",
+            "--noise-std",
+            "0.03",
+            "--seed",
+            "5",
+            "--output-root",
+            str(root),
+        ]
+    )
+
+    common_args = [
+        "--scene",
+        scene,
+        "--view",
+        "front",
+        "--image-size",
+        "16",
+        "--use-gpis-gate",
+        "false",
+        "--output-root",
+        str(root),
+    ]
+
+    render_main(
+        [
+            *common_args,
+            "--num-splats",
+            "12",
+            "--seed",
+            "1",
+        ]
+    )
+    out_dir = root / scene
+    splat_path = out_dir / "splats.npz"
+    metadata_path = out_dir / "splats_metadata.json"
+
+    first = load_splats(str(splat_path))
+    first_centers = first.centers.detach().cpu().numpy().copy()
+    assert first.centers.shape[0] == 12
+    assert read_json(metadata_path) == {
+        "schema_version": 1,
+        "generator": "make_candidate_splats",
+        "shape": "sphere",
+        "num_splats": 12,
+        "seed": 1,
+    }
+
+    render_main(
+        [
+            *common_args,
+            "--num-splats",
+            "12",
+            "--seed",
+            "2",
+        ]
+    )
+    second = load_splats(str(splat_path))
+    second_centers = second.centers.detach().cpu().numpy()
+    assert second.centers.shape[0] == 12
+    assert not np.allclose(first_centers, second_centers)
+    assert read_json(metadata_path)["seed"] == 2
+
+    render_main(
+        [
+            *common_args,
+            "--num-splats",
+            "9",
+            "--seed",
+            "2",
+        ]
+    )
+    third = load_splats(str(splat_path))
+    metadata = read_json(metadata_path)
+    assert third.centers.shape[0] == 9
+    assert metadata["num_splats"] == 9
+    assert metadata["seed"] == 2
 
 
 def test_feedback_ablation_runner_writes_comparison_table(tmp_path: Path) -> None:

@@ -253,6 +253,7 @@ def _materialize_images(frames: list[dict[str, Any]], scene_dir: Path, *, copy_i
         source_path = Path(frame["source_path"])
         dest_name = _unique_image_name(source_path.name, used_names, index=int(frame["index"]))
         next_frame = dict(frame)
+        next_frame["file_name"] = dest_name
         if copy_images:
             dest = image_out / dest_name
             shutil.copy2(source_path, dest)
@@ -269,9 +270,14 @@ def _unique_image_name(name: str, used_names: set[str], *, index: int) -> str:
         used_names.add(name)
         return name
     path = Path(name)
-    candidate = f"{index:06d}_{path.name}"
-    used_names.add(candidate)
-    return candidate
+    suffix = 0
+    while True:
+        prefix = f"{index:06d}" if suffix == 0 else f"{index:06d}_{suffix}"
+        candidate = f"{prefix}_{path.name}"
+        if candidate not in used_names:
+            used_names.add(candidate)
+            return candidate
+        suffix += 1
 
 
 def _resolve_source_image(input_dir: Path, image_dir: str, image_name: str) -> Path:

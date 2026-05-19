@@ -412,20 +412,29 @@ def optional_stat(values: np.ndarray | None, name: str) -> float | None:
 
 
 def resolve_scene_file(scene_root: Path, path: str | Path | None, default_name: str) -> Path:
-    resolved = Path(default_name) if path is None else Path(path)
-    if not resolved.is_absolute():
-        resolved = resolved if resolved.exists() else scene_root / resolved
-    return resolved
+    value = default_name if path is None else path
+    return _resolve_scene_path(scene_root, value)
 
 
 def resolve_optional_scene_file(scene_root: Path, requested: str | Path | None, fallback: str | None) -> Path | None:
     value = requested if requested is not None else fallback
     if value is None:
         return None
+    return _resolve_scene_path(scene_root, value)
+
+
+def _resolve_scene_path(scene_root: Path, value: str | Path) -> Path:
+    """Resolve scene artifacts while preferring prepared-scene local files."""
+
     resolved = Path(value)
-    if not resolved.is_absolute():
-        resolved = resolved if resolved.exists() else scene_root / resolved
-    return resolved
+    if resolved.is_absolute():
+        return resolved
+    scene_candidate = Path(scene_root) / resolved
+    if scene_candidate.exists():
+        return scene_candidate
+    if resolved.exists():
+        return resolved
+    return scene_candidate
 
 
 def format_threshold_label(value: float) -> str:

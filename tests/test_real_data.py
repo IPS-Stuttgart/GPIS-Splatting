@@ -201,6 +201,60 @@ def test_prepare_validate_and_evaluate_transforms_scene(tmp_path: Path) -> None:
     assert absolute_summary["infinite_psnr_count"] == 0
 
 
+def test_prepare_real_scene_preserves_unique_render_filenames_for_duplicate_basenames(tmp_path: Path) -> None:
+    dataset = tmp_path / "dataset"
+    (dataset / "left").mkdir(parents=True)
+    (dataset / "right").mkdir(parents=True)
+    (dataset / "collision").mkdir(parents=True)
+    _write_image(dataset / "left" / "frame.png", value=60)
+    _write_image(dataset / "collision" / "000002_frame.png", value=100)
+    _write_image(dataset / "right" / "frame.png", value=140)
+    write_json(
+        dataset / "transforms.json",
+        {
+            "camera_angle_x": 0.7,
+            "frames": [
+                {
+                    "file_path": "left/frame.png",
+                    "transform_matrix": _translated_identity(0.0, 0.0, 0.0),
+                },
+                {
+                    "file_path": "collision/000002_frame.png",
+                    "transform_matrix": _translated_identity(1.0, 0.0, 0.0),
+                },
+                {
+                    "file_path": "right/frame.png",
+                    "transform_matrix": _translated_identity(2.0, 0.0, 0.0),
+                },
+            ],
+        },
+    )
+
+    root = tmp_path / "real_scenes"
+    prepare_real_scene_main(
+        [
+            "--input-dir",
+            str(dataset),
+            "--scene",
+            "duplicate_basenames",
+            "--output-root",
+            str(root),
+            "--train-view-count",
+            "1",
+        ]
+    )
+
+    scene_dir = root / "duplicate_basenames"
+    cameras = read_json(scene_dir / "cameras.json")
+    file_names = [frame["file_name"] for frame in cameras["frames"]]
+    image_paths = [frame["image_path"] for frame in cameras["frames"]]
+
+    assert file_names == ["frame.png", "000002_frame.png", "000002_1_frame.png"]
+    assert file_names == [Path(image_path).name for image_path in image_paths]
+    assert len(set(file_names)) == len(file_names)
+    assert all((scene_dir / image_path).exists() for image_path in image_paths)
+
+
 def test_prepare_colmap_text_scene(tmp_path: Path) -> None:
     dataset = tmp_path / "colmap_dataset"
     images = dataset / "images"
@@ -263,6 +317,41 @@ def test_prepare_colmap_text_scene(tmp_path: Path) -> None:
 def test_sparse_split_is_deterministic() -> None:
     assert build_sparse_split(5, 3)["train"] == [0, 2, 4]
     assert build_sparse_split(2, 12)["train"] == [0, 1]
+
+
+def test_real_geometry_paths_resolve_relative_to_scene_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scene_root = tmp_path / "scene"
+    cwd = tmp_path / "cwd"
+    scene_root.mkdir()
+    cwd.mkdir()
+
+    scene_splats = scene_root / "real_splats.npz"
+    cwd_splats = cwd / "real_splats.npz"
+    scene_alignment = scene_root / "alignment.txt"
+    cwd_alignment = cwd / "alignment.txt"
+    scene_splats.write_text("scene splats", encoding="utf-8")
+    cwd_splats.write_text("cwd splats", encoding="utf-8")
+    scene_alignment.write_text("scene alignment", encoding="utf-8")
+    cwd_alignment.write_text("cwd alignment", encoding="utf-8")
+
+    monkeypatch.chdir(cwd)
+
+    assert resolve_scene_file(scene_root, None, "real_splats.npz") == scene_splats
+    assert resolve_scene_file(scene_root, "real_splats.npz", "unused.npz") == scene_splats
+    assert (
+        resolve_optional_scene_file(scene_root, "alignment.txt", None)
+        == scene_alignment
+    )
+    assert (
+        resolve_optional_scene_file(scene_root, None, "alignment.txt")
+        == scene_alignment
+    )
+    assert resolve_optional_scene_file(scene_root, None, None) is None
+
+    external_splats = tmp_path / "external_splats.npz"
+    assert resolve_scene_file(scene_root, external_splats, "real_splats.npz") == external_splats
 
 
 def test_bootstrap_real_gpis_from_colmap_points(tmp_path: Path) -> None:

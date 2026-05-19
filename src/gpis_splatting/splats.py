@@ -46,7 +46,8 @@ def make_candidate_splats(
     surface_idx = torch.topk(values.abs(), k=n_surface, largest=False).indices
     centers_surface = candidates[surface_idx]
     normals = sdf_normals(centers_surface, shape)
-    centers_surface = centers_surface + normals * (torch.randn(centers_surface.shape, dtype=dtype, generator=generator) * 0.015)
+    surface_jitter = torch.randn((centers_surface.shape[0], 1), dtype=dtype, generator=generator) * 0.015
+    centers_surface = centers_surface + normals * surface_jitter
 
     off_candidates = torch.empty(max(6000, n_off * 80), 3, dtype=dtype).uniform_(lo, hi, generator=generator)
     off_values = sdf(off_candidates, shape).abs()
