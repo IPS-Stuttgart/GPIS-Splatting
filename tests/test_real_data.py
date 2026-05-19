@@ -30,8 +30,9 @@ from gpis_splatting.cli.run_tanks_temples_hard_negative_calibration import main 
 from gpis_splatting.cli.run_tanks_temples_gate_sweep import main as run_tanks_temples_gate_sweep_main
 from gpis_splatting.cli.validate_real_scene import main as validate_real_scene_main
 from gpis_splatting.real_bootstrap import load_ply_point_cloud
+from gpis_splatting.real_benchmark import find_prediction_image
 from gpis_splatting.real_geometry import crop_mask, evaluate_geometry_group, nearest_neighbor_distances, resolve_optional_scene_file, resolve_scene_file
-from gpis_splatting.real_scene import build_sparse_split
+from gpis_splatting.real_scene import build_sparse_split, resolve_frame_output_names
 from gpis_splatting.serialization import read_json, write_json
 from gpis_splatting.splats import SplatCloud, load_splats, save_splats
 from gpis_splatting.tanks_temples import (
@@ -260,6 +261,61 @@ def test_prepare_colmap_text_scene(tmp_path: Path) -> None:
     assert cameras["frames"][1]["camera_to_world"][0][3] == -1.0
 
 
+def test_prepare_real_scene_disambiguates_duplicate_image_basenames(tmp_path: Path) -> None:
+    dataset = tmp_path / "duplicate_dataset"
+    (dataset / "view_a").mkdir(parents=True)
+    (dataset / "view_b").mkdir(parents=True)
+    _write_image(dataset / "view_a" / "shared.png", value=40)
+    _write_image(dataset / "view_b" / "shared.png", value=80)
+    write_json(
+        dataset / "transforms.json",
+        {
+            "camera_angle_x": 0.7,
+            "frames": [
+                {"file_path": "view_a/shared.png", "transform_matrix": _translated_identity(0.0, 0.0, 0.0)},
+                {"file_path": "view_b/shared.png", "transform_matrix": _translated_identity(1.0, 0.0, 0.0)},
+            ],
+        },
+    )
+
+    root = tmp_path / "real_scenes"
+    prepare_real_scene_main(
+        [
+            "--input-dir",
+            str(dataset),
+            "--scene",
+            "duplicate_sparse",
+            "--output-root",
+            str(root),
+            "--train-view-count",
+            "1",
+        ]
+    )
+
+    cameras = read_json(root / "duplicate_sparse" / "cameras.json")
+    frames = cameras["frames"]
+    assert [frame["file_name"] for frame in frames] == ["shared.png", "000001_shared.png"]
+    assert [frame["image_path"] for frame in frames] == ["images/shared.png", "images/000001_shared.png"]
+    assert (root / "duplicate_sparse" / "images" / "shared.png").exists()
+    assert (root / "duplicate_sparse" / "images" / "000001_shared.png").exists()
+
+
+def test_frame_output_names_avoid_stale_duplicate_file_name_collisions(tmp_path: Path) -> None:
+    frames = [
+        {"index": 0, "file_name": "shared.png", "image_path": "images/shared.png"},
+        {"index": 1, "file_name": "shared.png", "image_path": "images/000001_shared.png"},
+    ]
+
+    assert resolve_frame_output_names(frames, [0, 1]) == {0: "shared.png", 1: "000001_shared.png"}
+
+    prediction_root = tmp_path / "predictions"
+    prediction_root.mkdir()
+    expected_prediction = prediction_root / "000001_shared.png"
+    expected_prediction.write_bytes(b"prediction")
+
+    assert find_prediction_image(prediction_root, {"index": 1, "file_name": "shared.png", "image_path": "/source/shared.png"}) == expected_prediction
+
+
 def test_sparse_split_is_deterministic() -> None:
     assert build_sparse_split(5, 3)["train"] == [0, 2, 4]
     assert build_sparse_split(2, 12)["train"] == [0, 1]
@@ -479,6 +535,8 @@ def test_real_gpis_fit_render_and_evaluate_loop(tmp_path: Path) -> None:
             "real_gpis_gate",
             "--split",
             "train",
+            "--allow-diagnostic-proxy",
+            "true",
         ]
     )
     metrics = pd.read_csv(scene_dir / "evaluations" / "real_gpis_gate_train_image_metrics.csv")

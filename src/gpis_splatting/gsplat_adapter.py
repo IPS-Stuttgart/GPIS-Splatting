@@ -11,7 +11,7 @@ import torch
 
 from gpis_splatting.external_3dgs import load_3dgs_ply, opacity_to_alpha, vertex_colors
 from gpis_splatting.real_pipeline import PROJECTION_CONVENTIONS, resolve_frame_indices, resolve_projection_convention
-from gpis_splatting.real_scene import load_prepared_scene
+from gpis_splatting.real_scene import load_prepared_scene, resolve_frame_output_names
 from gpis_splatting.renderer import save_image
 from gpis_splatting.serialization import write_json
 
@@ -100,6 +100,7 @@ def render_3dgs_ply_with_gsplat(
     convention = resolve_projection_convention(scene_meta, projection_convention)
     background = torch.tensor(background_color, dtype=resolved_dtype, device=resolved_device).reshape(1, 3)
 
+    output_file_names = resolve_frame_output_names(frames, frame_indices)
     outputs = []
     for frame_index in frame_indices:
         frame = frames[int(frame_index)]
@@ -116,7 +117,7 @@ def render_3dgs_ply_with_gsplat(
             packed=packed,
             render_mode=render_mode,
         )
-        file_name = str(frame.get("file_name") or Path(str(frame["image_path"])).name)
+        file_name = output_file_names[int(frame_index)]
         image_path = out_dir / file_name
         save_image(image_path, image)
         outputs.append({"frame_index": int(frame_index), "image_path": frame.get("image_path"), "prediction_path": str(image_path), "file_name": file_name, "width": camera.width, "height": camera.height, **render_stats})

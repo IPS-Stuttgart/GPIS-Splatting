@@ -104,7 +104,7 @@ def sample_scene(
     near_idx = torch.topk(candidate_sdf.abs(), k=near_count, largest=False).indices
     near_points = candidates[near_idx]
     normals = sdf_normals(near_points, shape)
-    jitter = torch.randn(near_points.shape, dtype=dtype, generator=generator) * 0.035
+    jitter = torch.randn((near_points.shape[0], 1), dtype=dtype, generator=generator) * 0.035
     near_points = near_points + normals * jitter
 
     volume_points = torch.empty(n_volume, 3, dtype=dtype).uniform_(lo, hi, generator=generator)

@@ -25,22 +25,62 @@ def brier_score(prob: np.ndarray, labels: np.ndarray) -> float:
     return float(np.mean((prob - labels.astype(np.float64)) ** 2))
 
 
-def expected_calibration_error(prob: np.ndarray, labels: np.ndarray, bins: int = 10) -> float:
-    prob = prob.reshape(-1)
+def expected_calibration_error(prob: np.ndarray, labels: np.ndarray, bins: int = 10, *, binning: str = "fixed") -> float:
+    """Return the expected calibration error for binary probabilities.
+
+    The default uses fixed-width probability bins on [0, 1], which is the usual
+    ECE definition used for comparing calibration across methods.  The previous
+    equal-count/adaptive behavior remains available via ``binning="adaptive"``
+    for backwards compatibility and diagnostic plots.
+    """
+    if bins <= 0:
+        raise ValueError("bins must be positive")
+
+    prob = prob.astype(np.float64, copy=False).reshape(-1)
     labels = labels.astype(np.float64).reshape(-1)
-    order = np.argsort(prob)
-    prob = prob[order]
-    labels = labels[order]
-    chunks = np.array_split(np.arange(prob.shape[0]), bins)
+
+    if prob.shape != labels.shape:
+        raise ValueError("prob and labels must have the same number of elements")
+    if np.any((prob < 0.0) | (prob > 1.0)):
+        raise ValueError("prob must contain probabilities in [0, 1]")
+
+    total = prob.shape[0]
+    if total == 0:
+        return 0.0
+
     ece = 0.0
-    total = max(prob.shape[0], 1)
-    for chunk in chunks:
-        if chunk.size == 0:
-            continue
-        confidence = float(prob[chunk].mean())
-        accuracy = float(labels[chunk].mean())
-        ece += (chunk.size / total) * abs(confidence - accuracy)
-    return float(ece)
+
+    if binning == "fixed":
+        edges = np.linspace(0.0, 1.0, bins + 1)
+        for bin_index in range(bins):
+            lower = edges[bin_index]
+            upper = edges[bin_index + 1]
+            if bin_index == bins - 1:
+                mask = (prob >= lower) & (prob <= upper)
+            else:
+                mask = (prob >= lower) & (prob < upper)
+            count = int(np.count_nonzero(mask))
+            if count == 0:
+                continue
+            confidence = float(prob[mask].mean())
+            accuracy = float(labels[mask].mean())
+            ece += (count / total) * abs(confidence - accuracy)
+        return float(ece)
+
+    if binning == "adaptive":
+        order = np.argsort(prob)
+        prob_sorted = prob[order]
+        labels_sorted = labels[order]
+        chunks = np.array_split(np.arange(total), bins)
+        for chunk in chunks:
+            if chunk.size == 0:
+                continue
+            confidence = float(prob_sorted[chunk].mean())
+            accuracy = float(labels_sorted[chunk].mean())
+            ece += (chunk.size / total) * abs(confidence - accuracy)
+        return float(ece)
+
+    raise ValueError("binning must be 'fixed' or 'adaptive'")
 
 
 def gaussian_nll(residual: np.ndarray, variance: np.ndarray) -> float:

@@ -253,6 +253,7 @@ def _materialize_images(frames: list[dict[str, Any]], scene_dir: Path, *, copy_i
         source_path = Path(frame["source_path"])
         dest_name = _unique_image_name(source_path.name, used_names, index=int(frame["index"]))
         next_frame = dict(frame)
+        next_frame["file_name"] = dest_name
         if copy_images:
             dest = image_out / dest_name
             shutil.copy2(source_path, dest)
@@ -264,6 +265,48 @@ def _materialize_images(frames: list[dict[str, Any]], scene_dir: Path, *, copy_i
     return prepared
 
 
+def resolve_frame_output_names(frames: list[dict[str, Any]], frame_indices: list[int]) -> dict[int, str]:
+    """Return collision-free output filenames for rendered predictions.
+
+    Prepared scenes historically stored the original source basename in
+    ``file_name`` even when ``image_path`` had been made unique during scene
+    materialization.  Rendering directly to ``file_name`` could then overwrite
+    predictions for scenes that contain images with the same basename in
+    different source directories.  Prefer unique metadata names when available,
+    fall back to unique materialized image basenames for older prepared scenes,
+    and finally add the frame index as a deterministic disambiguator.
+    """
+
+    selected = [(int(index), frames[int(index)]) for index in frame_indices]
+    file_names = [_path_name(frame.get("file_name")) for _, frame in selected]
+    image_names = [_path_name(frame.get("image_path")) for _, frame in selected]
+    duplicate_file_names = _duplicates(file_names)
+    duplicate_image_names = _duplicates(image_names)
+    used: set[str] = set()
+    resolved: dict[int, str] = {}
+    for frame_index, frame in selected:
+        file_name = _path_name(frame.get("file_name"))
+        image_name = _path_name(frame.get("image_path"))
+        candidates = []
+        if file_name and file_name not in duplicate_file_names:
+            candidates.append(file_name)
+        if image_name and image_name not in duplicate_image_names:
+            candidates.append(image_name)
+        candidates.extend(name for name in (file_name, image_name) if name)
+        candidates = list(dict.fromkeys(candidates))
+        output_name = next((name for name in candidates if name not in used), None)
+        if output_name is None:
+            reference_name = candidates[0] if candidates else f"frame_{frame_index:06d}.png"
+            output_name = f"{frame_index:06d}_{reference_name}"
+            suffix = 1
+            while output_name in used:
+                output_name = f"{frame_index:06d}_{suffix}_{reference_name}"
+                suffix += 1
+        used.add(output_name)
+        resolved[frame_index] = output_name
+    return resolved
+
+
 def _unique_image_name(name: str, used_names: set[str], *, index: int) -> str:
     if name not in used_names:
         used_names.add(name)
@@ -272,6 +315,24 @@ def _unique_image_name(name: str, used_names: set[str], *, index: int) -> str:
     candidate = f"{index:06d}_{path.name}"
     used_names.add(candidate)
     return candidate
+
+
+def _path_name(value: Any) -> str:
+    if value is None:
+        return ""
+    return Path(str(value)).name
+
+
+def _duplicates(values: list[str]) -> set[str]:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        if value in seen:
+            duplicates.add(value)
+        seen.add(value)
+    return duplicates
 
 
 def _resolve_source_image(input_dir: Path, image_dir: str, image_name: str) -> Path:

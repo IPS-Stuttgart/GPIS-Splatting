@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from gpis_splatting.gpis import fit_dense_gpis, load_model, save_model
-from gpis_splatting.real_scene import load_prepared_scene
+from gpis_splatting.real_scene import load_prepared_scene, resolve_frame_output_names
 from gpis_splatting.renderer import save_image
 from gpis_splatting.serialization import write_json
 from gpis_splatting.splats import SplatCloud, gpis_gate_for_splats, load_splats
@@ -217,6 +217,7 @@ def render_real_splats(
     if not frame_indices:
         raise ValueError(f"Split {split!r} did not resolve to any frames.")
 
+    output_file_names = resolve_frame_output_names(frames, frame_indices)
     outputs = []
     for frame_index in frame_indices:
         frame = frames[int(frame_index)]
@@ -231,7 +232,8 @@ def render_real_splats(
             min_sigma_px=min_sigma_px,
             background_color=background_color,
         )
-        image_path = resolved_output / frame["file_name"]
+        file_name = output_file_names[int(frame_index)]
+        image_path = resolved_output / file_name
         save_image(image_path, image)
         outputs.append(
             {
@@ -239,6 +241,7 @@ def render_real_splats(
                 "image_path": frame["image_path"],
                 "prediction_path": str(image_path),
                 "projection_convention": convention,
+                "file_name": file_name,
                 **stats,
             }
         )

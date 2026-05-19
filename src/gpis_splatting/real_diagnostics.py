@@ -18,7 +18,7 @@ from gpis_splatting.real_pipeline import (
     resolve_frame_indices,
     resolve_projection_convention,
 )
-from gpis_splatting.real_scene import load_prepared_scene, resolve_scene_image_path
+from gpis_splatting.real_scene import load_prepared_scene, resolve_frame_output_names, resolve_scene_image_path
 from gpis_splatting.renderer import load_image, save_image
 from gpis_splatting.serialization import write_json
 from gpis_splatting.splats import gpis_gate_for_splats, load_splats
@@ -83,6 +83,7 @@ def diagnose_real_render(
     gated_root = Path(gated_renders_dir) if gated_renders_dir is not None else None
     rows = []
     artifacts = []
+    output_file_names = resolve_frame_output_names(frames, frame_indices)
     plain_gate = torch.ones_like(gate)
     for frame_index in frame_indices:
         frame = frames[int(frame_index)]
@@ -93,6 +94,7 @@ def diagnose_real_render(
             gate=plain_gate,
             predictions_dir=plain_root,
             output_dir=render_dir / "plain",
+            output_name=output_file_names[int(frame_index)],
             projection_convention=convention,
             near_plane=near_plane,
             kernel_radius=kernel_radius,
@@ -105,6 +107,7 @@ def diagnose_real_render(
             gate=gate,
             predictions_dir=gated_root,
             output_dir=render_dir / "gated",
+            output_name=output_file_names[int(frame_index)],
             projection_convention=convention,
             near_plane=near_plane,
             kernel_radius=kernel_radius,
@@ -231,6 +234,7 @@ def resolve_diagnostic_render(
     gate: torch.Tensor,
     predictions_dir: Path | None,
     output_dir: Path,
+    output_name: str | None = None,
     projection_convention: str,
     near_plane: float,
     kernel_radius: float,
@@ -254,7 +258,8 @@ def resolve_diagnostic_render(
         min_sigma_px=min_sigma_px,
         background_color=background_color,
     )
-    output_path = output_dir / frame["file_name"]
+    resolved_output_name = output_name or resolve_frame_output_names([frame], [0])[0]
+    output_path = output_dir / resolved_output_name
     save_image(output_path, image)
     return image.detach().cpu().numpy(), stats, output_path
 

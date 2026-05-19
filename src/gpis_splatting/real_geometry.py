@@ -414,7 +414,9 @@ def optional_stat(values: np.ndarray | None, name: str) -> float | None:
 def resolve_scene_file(scene_root: Path, path: str | Path | None, default_name: str) -> Path:
     resolved = Path(default_name) if path is None else Path(path)
     if not resolved.is_absolute():
-        resolved = resolved if resolved.exists() else scene_root / resolved
+        scene_relative = scene_root / resolved
+        cwd_relative = Path.cwd() / resolved
+        resolved = cwd_relative if cwd_relative.exists() and not scene_relative.exists() else scene_relative
     return resolved
 
 
@@ -424,7 +426,9 @@ def resolve_optional_scene_file(scene_root: Path, requested: str | Path | None, 
         return None
     resolved = Path(value)
     if not resolved.is_absolute():
-        resolved = resolved if resolved.exists() else scene_root / resolved
+        scene_relative = scene_root / resolved
+        cwd_relative = Path.cwd() / resolved
+        resolved = cwd_relative if cwd_relative.exists() and not scene_relative.exists() else scene_relative
     return resolved
 
 

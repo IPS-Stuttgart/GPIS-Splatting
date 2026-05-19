@@ -8,6 +8,32 @@ from gpis_splatting.scenes import sample_scene
 from gpis_splatting.splats import make_candidate_splats
 
 
+def test_surface_jitter_is_scalar_per_point(monkeypatch) -> None:
+    randn_shapes: list[tuple[int, ...]] = []
+    original_randn = torch.randn
+
+    def recording_randn(*args, **kwargs):
+        shape_arg = args[0] if args else kwargs.get("size", ())
+        if isinstance(shape_arg, torch.Size):
+            shape = tuple(shape_arg)
+        elif isinstance(shape_arg, (tuple, list)):
+            shape = tuple(shape_arg)
+        elif isinstance(shape_arg, int):
+            shape = (shape_arg,)
+        else:
+            shape = tuple(shape_arg)
+        randn_shapes.append(shape)
+        return original_randn(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "randn", recording_randn)
+
+    sample_scene("sphere", num_points=20, seed=3, noise_std=0.02)
+    make_candidate_splats("sphere", num_splats=20, offsurface_fraction=0.28, seed=11)
+
+    assert randn_shapes.count((14, 1)) == 2
+    assert (14, 3) not in randn_shapes
+
+
 def test_rbf_kernel_is_symmetric_and_psd() -> None:
     points = torch.tensor(
         [

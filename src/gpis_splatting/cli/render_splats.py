@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import numpy as np
 
@@ -10,6 +11,42 @@ from gpis_splatting.paths import scene_dir
 from gpis_splatting.renderer import render_splats, save_image, selected_views
 from gpis_splatting.serialization import read_json, write_json
 from gpis_splatting.splats import gpis_gate_for_splats, load_splats, make_candidate_splats, save_splats
+
+SPLAT_CACHE_METADATA_VERSION = 1
+SPLAT_CACHE_GENERATOR = "make_candidate_splats"
+
+
+def _expected_splat_cache_metadata(shape: str, num_splats: int, seed: int) -> dict[str, object]:
+    return {
+        "cache_version": SPLAT_CACHE_METADATA_VERSION,
+        "generator": SPLAT_CACHE_GENERATOR,
+        "shape": shape,
+        "num_splats": int(num_splats),
+        "seed": int(seed),
+    }
+
+
+def _splat_cache_metadata_mismatches(cached: dict[str, object], expected: dict[str, object]) -> list[str]:
+    return [f"{key}: cached={cached.get(key)!r}, requested={value!r}" for key, value in expected.items() if cached.get(key) != value]
+
+
+def _load_cached_splats(splat_path: Path, metadata_path: Path, expected_metadata: dict[str, object]):
+    if not metadata_path.exists():
+        raise ValueError(
+            f"Refusing to reuse {splat_path} because {metadata_path} is missing. "
+            "This cache predates splat metadata, so --num-splats and --seed cannot be validated. "
+            "Delete the cached splats.npz or rerun with --regenerate-splats."
+        )
+
+    cached_metadata = read_json(metadata_path)
+    mismatches = _splat_cache_metadata_mismatches(cached_metadata, expected_metadata)
+    if mismatches:
+        raise ValueError(
+            f"Refusing to reuse {splat_path}; cached splats do not match the requested settings "
+            f"({'; '.join(mismatches)}). Delete the cached splats.npz or rerun with --regenerate-splats."
+        )
+
+    return load_splats(str(splat_path))
 
 
 def str_to_bool(value: str) -> bool:
@@ -31,6 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num-splats", type=int, default=700)
     parser.add_argument("--epsilon", type=float, default=0.09)
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument(
+        "--regenerate-splats",
+        action="store_true",
+        help="Regenerate splats.npz even if a cached file exists; use when intentionally changing --num-splats or --seed.",
+    )
     parser.add_argument("--feedback-iterations", type=int, default=0, help="Number of GPIS-splat feedback refits.")
     parser.add_argument(
         "--feedback-pseudo-points",
@@ -74,11 +116,14 @@ def main(argv: list[str] | None = None) -> None:
     bounds = tuple(config["bounds"])
 
     splat_path = out_dir / "splats.npz"
-    if splat_path.exists():
-        splats = load_splats(str(splat_path))
+    splat_metadata_path = out_dir / "splats_metadata.json"
+    expected_splat_metadata = _expected_splat_cache_metadata(shape, args.num_splats, args.seed)
+    if splat_path.exists() and not args.regenerate_splats:
+        splats = _load_cached_splats(splat_path, splat_metadata_path, expected_splat_metadata)
     else:
         splats = make_candidate_splats(shape, num_splats=args.num_splats, seed=args.seed)
         save_splats(str(splat_path), splats)
+        write_json(splat_metadata_path, expected_splat_metadata)
 
     model = None
     gate = None

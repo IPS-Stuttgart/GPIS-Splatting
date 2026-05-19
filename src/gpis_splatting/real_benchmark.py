@@ -127,6 +127,9 @@ def find_prediction_image(predictions_dir: str | Path, frame: dict[str, Any]) ->
         candidates.append(root / file_name)
     candidates.append(root / file_name.name)
     if suffix:
+        for name in dict.fromkeys([image_path.name, file_name.name]):
+            if name:
+                candidates.append(root / f"{frame['index']:06d}_{name}")
         candidates.extend([root / f"{frame['index']:06d}{suffix}", root / f"{frame['index']:03d}{suffix}"])
     for candidate in unique_paths(candidates):
         if candidate.exists():
